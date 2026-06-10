@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#067a33">
+<title>{% block title %}ZimJobs Hub — Jobs in Zimbabwe & Remote Work{% endblock %}</title>
+<meta name="description" content="{% block desc %}Latest jobs in Zimbabwe: NGO, government, private sector, internships and remote jobs that hire Zimbabweans. Updated daily.{% endblock %}">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<link rel="icon" href="{{ url_for('static', filename='icon.svg') }}" type="image/svg+xml">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='icon.svg') }}">
+<link rel="alternate" type="application/rss+xml" title="ZimJobs Hub" href="/feed.xml">
+{% block head %}{% endblock %}
+</head>
+<body>
+<header>
+  <div class="bar">
+    <a class="logo" href="/">Zim<span>Jobs</span><small>Hub</small></a>
+    <form action="/" method="get" class="search" role="search">
+      <input type="search" name="q" placeholder="Search jobs… nurse, NGO, remote"
+             value="{{ q or '' }}" aria-label="Search jobs">
+      <button type="submit" aria-label="Search">🔍</button>
+    </form>
+  </div>
+  <nav class="cats" aria-label="Job categories">
+    <a href="/" class="{{ 'on' if not cat }}">All</a>
+    {% for c in categories %}
+    <a href="/?cat={{ c|urlencode }}" class="{{ 'on' if cat == c }}">{{ c }}</a>
+    {% endfor %}
+  </nav>
+</header>
+
+<main>{% block content %}{% endblock %}</main>
+
+<footer>
+  <a class="wa" href="https://whatsapp.com/channel/YOUR_CHANNEL_ID">
+    📲 Join our free WhatsApp jobs channel</a>
+  <p><a href="/services">CV Writing</a> · <a href="/post">Post a Job</a> ·
+     <a href="/feed.xml">RSS</a></p>
+  <p>© ZimJobs Hub — jobs in Zimbabwe &amp; remote work for Zimbabweans.</p>
+</footer>
+<script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</body>
+</html>

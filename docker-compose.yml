@@ -1,0 +1,15 @@
+services:
+  web:
+    build: .
+    image: zimjobs:2.0
+    ports:
+      - "8000:8000"
+    environment:
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-change-me}
+      - SITE_URL=${SITE_URL:-http://localhost:8000}
+    volumes:
+      - jobsdata:/data
+    restart: unless-stopped
+
+volumes:
+  jobsdata:

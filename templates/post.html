@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Post a Job | ZimJobs Hub{% endblock %}
+{% block content %}
+<article class="card detail">
+  <h1>Post a Job</h1>
+  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+  <form method="post" class="form">
+    <label>Job title <input name="title" required></label>
+    <label>Company <input name="company" required></label>
+    <label>Location <input name="location" required placeholder="e.g. Harare or Remote"></label>
+    <label>Category
+      <select name="category">{% for c in categories %}<option>{{ c }}</option>{% endfor %}</select>
+    </label>
+    <label>Summary <textarea name="summary" rows="5" required></textarea></label>
+    <label>Apply URL <input name="apply_url" type="url" required></label>
+    <label class="chk"><input type="checkbox" name="featured">
+      Featured listing ($15 — invoice via PayPal)</label>
+    <label>Admin token <input name="token" type="password" required></label>
+    <button class="btn" type="submit">Publish job</button>
+  </form>
+</article>
+{% endblock %}

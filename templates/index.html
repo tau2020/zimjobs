@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="meta">{{ total }} job{{ '' if total == 1 else 's' }}
+  {%- if cat %} in {{ cat }}{% endif %}{% if q %} matching “{{ q }}”{% endif %}</p>
+
+{% for j in jobs %}
+<a class="card {{ 'featured' if j['featured'] }}"
+   href="/job/{{ j['id'] }}/{{ j['title']|slug }}">
+  {% if j['featured'] %}<span class="ribbon">★ Featured</span>{% endif %}
+  <h2>{{ j['title'] }}</h2>
+  <p class="firm">{{ j['company'] }} <i>·</i> {{ j['location'] }}</p>
+  <p class="sum">{{ j['summary'][:130] }}…</p>
+  <p class="tag"><b>{{ j['category'] }}</b><span>{{ j['created_at']|ago }}</span></p>
+</a>
+{% else %}
+<div class="card empty"><p>No jobs found. Try another search or
+   <a href="/">browse all jobs</a>.</p></div>
+{% endfor %}
+
+{% if pages > 1 %}
+<nav class="pager">
+  {% if page > 1 %}<a href="?q={{ q|urlencode }}&cat={{ cat|urlencode }}&page={{ page-1 }}">← Newer</a>{% else %}<i></i>{% endif %}
+  <span>{{ page }} / {{ pages }}</span>
+  {% if page < pages %}<a href="?q={{ q|urlencode }}&cat={{ cat|urlencode }}&page={{ page+1 }}">Older →</a>{% else %}<i></i>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

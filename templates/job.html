@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ job['title'] }} — {{ job['company'] }} | ZimJobs Hub{% endblock %}
+{% block desc %}{{ job['title'] }} at {{ job['company'] }}, {{ job['location'] }}. Apply now via ZimJobs Hub.{% endblock %}
+{% block head %}
+<meta property="og:title" content="{{ job['title'] }} — {{ job['company'] }}">
+<meta property="og:description" content="{{ job['summary'][:150] }}">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"JobPosting",
+ "title":{{ job['title']|tojson }},
+ "description":{{ job['summary']|tojson }},
+ "datePosted":"{{ job['created_at'][:10] }}",
+ "hiringOrganization":{"@type":"Organization","name":{{ job['company']|tojson }}},
+ "jobLocation":{"@type":"Place","address":{{ job['location']|tojson }}},
+ "url":{{ url|tojson }}}
+</script>
+{% endblock %}
+{% block content %}
+<article class="card detail">
+  <h1>{{ job['title'] }}</h1>
+  <p class="firm">{{ job['company'] }} <i>·</i> {{ job['location'] }}</p>
+  <p class="tag"><b>{{ job['category'] }}</b><span>Posted {{ job['created_at']|ago }}</span></p>
+  <p class="body">{{ job['summary'] }}</p>
+  <a class="btn" href="{{ job['apply_url'] }}" rel="nofollow noopener">Apply on official site →</a>
+  <div class="share">
+    <a class="btn wa-share"
+       href="https://wa.me/?text={{ (job['title'] ~ ' at ' ~ job['company'] ~ ' — ' ~ url)|urlencode }}">
+       Share on WhatsApp</a>
+    <button class="btn ghost" data-copy="{{ url }}">Copy link</button>
+  </div>
+  <p class="meta">⚠ Always apply on the official source. Never pay anyone to apply for a job.</p>
+</article>
+<aside class="card promo">
+  <h2>Need a CV that gets interviews?</h2>
+  <p>Professional, ATS-friendly CV rewrite from <strong>$10</strong> — delivered in 24 hours.</p>
+  <a class="btn gold" href="/services">Get your CV done →</a>
+</aside>
+{% endblock %}

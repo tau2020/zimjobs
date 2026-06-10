@@ -1,0 +1,13 @@
+{
+  "name": "ZimJobs Hub — Jobs in Zimbabwe",
+  "short_name": "ZimJobs",
+  "description": "Jobs in Zimbabwe and remote work for Zimbabweans.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#067a33",
+  "theme_color": "#067a33",
+  "icons": [
+    { "src": "/static/icon.svg", "sizes": "any",
+      "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
