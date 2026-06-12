@@ -1,6 +1,27 @@
+# Python virtual environments
+.venv/
 venv/
+env/
+
+.DS_Store
+
+
+
+# Python cache/build files
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# SQLite/database files
 *.db
 *.db-shm
 *.db-wal
-*.pyc
+*.sqlite
+*.sqlite3
+
+# Environment/secrets
+.env
+.env.*
