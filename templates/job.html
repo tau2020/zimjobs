@@ -26,6 +26,14 @@
        href="https://wa.me/?text={{ (job['title'] ~ ' at ' ~ job['company'] ~ ' — ' ~ url)|urlencode }}">
        Share on WhatsApp</a>
     <button class="btn ghost" data-copy="{{ url }}">Copy link</button>
+    {% if current_user %}
+    <form method="post" class="inline-form"
+          action="/job/{{ job['id'] }}/{{ 'unsave' if is_saved(job['id']) else 'save' }}">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <button class="btn ghost" type="submit">
+        {{ '★ Saved' if is_saved(job['id']) else '☆ Save job' }}</button>
+    </form>
+    {% endif %}
   </div>
   <p class="meta">⚠ Always apply on the official source. Never pay anyone to apply for a job.</p>
 </article>

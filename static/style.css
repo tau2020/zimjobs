@@ -100,3 +100,34 @@ footer a{color:var(--g)}
 .wa{display:block;background:#25d366;color:#fff;font-weight:700;
     padding:.85rem;border-radius:12px;text-decoration:none;
     margin-bottom:.9rem;box-shadow:var(--shadow)}
+
+/* ------------------- user accounts & admin portal ------------------- */
+.inline-form{display:inline}
+.btn.sm{padding:.4rem .75rem;font-size:.82rem;margin-top:0}
+.btn.danger{background:#b00020;color:#fff}
+.flash{background:#e6f6ec;color:#0a5c2b;border:1px solid #bfe6cd;
+       padding:.65rem;border-radius:8px;margin-bottom:.5rem}
+@media (prefers-color-scheme:dark){
+  .flash{background:#11301d;color:#7fe0a4;border-color:#1d4a2d}}
+.admin-nav{display:flex;gap:.45rem;flex-wrap:wrap;margin-bottom:.8rem}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));
+       gap:.6rem;margin-bottom:.75rem}
+.stat{text-align:center;padding:.8rem .4rem}
+.stat b{display:block;font-size:1.5rem;color:var(--g)}
+@media (prefers-color-scheme:dark){.stat b{color:#5dd388}}
+.stat span{font-size:.78rem;color:var(--mut)}
+.table-wrap{overflow-x:auto}
+.table{width:100%;border-collapse:collapse;font-size:.86rem}
+.table th,.table td{padding:.5rem .4rem;border-bottom:1px solid var(--line);
+                    text-align:left;vertical-align:middle}
+.table th{color:var(--mut);font-size:.76rem;text-transform:uppercase;
+          letter-spacing:.03em}
+.table .actions{display:flex;gap:.35rem;flex-wrap:wrap}
+.badge{display:inline-block;font-size:.7rem;font-weight:700;
+       padding:.12rem .5rem;border-radius:99px;background:var(--line)}
+.badge.green{background:#d8f3e1;color:#0a5c2b}
+.badge.gold{background:var(--gold);color:#1d1602}
+.badge.red{background:#fde8e8;color:#b00020}
+@media (prefers-color-scheme:dark){
+  .badge.green{background:#1d4a2d;color:#7fe0a4}
+  .badge.red{background:#4a1d1d;color:#f3a3a3}}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard | ZimJobs Hub{% endblock %}
+{% block content %}
+{% set active = 'dash' %}{% include "admin/_nav.html" %}
+{% include "_flashes.html" %}
+<div class="stats">
+  <div class="card stat"><b>{{ stats['jobs'] }}</b><span>Jobs</span></div>
+  <div class="card stat"><b>{{ stats['featured'] }}</b><span>Featured</span></div>
+  <div class="card stat"><b>{{ stats['users'] }}</b><span>Users</span></div>
+  <div class="card stat"><b>{{ stats['new_users'] }}</b><span>New (7d)</span></div>
+  <div class="card stat"><b>{{ stats['saved'] }}</b><span>Saves</span></div>
+</div>
+<article class="card detail">
+  <h2>Jobs by category</h2>
+  <table class="table">
+    {% for r in by_cat %}
+    <tr><td>{{ r['category'] }}</td><td>{{ r['c'] }}</td></tr>
+    {% endfor %}
+  </table>
+</article>
+<article class="card detail">
+  <h2>Newest users</h2>
+  <div class="table-wrap"><table class="table">
+    <tr><th>Name</th><th>Email</th><th>Joined</th></tr>
+    {% for u in recent_users %}
+    <tr><td>{{ u['name'] }}</td><td>{{ u['email'] }}</td>
+        <td>{{ u['created_at']|ago }}</td></tr>
+    {% endfor %}
+  </table></div>
+</article>
+{% endblock %}

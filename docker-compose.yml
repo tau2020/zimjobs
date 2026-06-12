@@ -7,6 +7,9 @@ services:
     environment:
       - ADMIN_TOKEN=${ADMIN_TOKEN:-change-me}
       - SITE_URL=${SITE_URL:-http://localhost:8000}
+      - SECRET_KEY=${SECRET_KEY:-}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@zimjobs.local}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
     volumes:
       - jobsdata:/data
     restart: unless-stopped

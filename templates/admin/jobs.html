@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Manage Jobs | Admin | ZimJobs Hub{% endblock %}
+{% block content %}
+{% set active = 'jobs' %}{% include "admin/_nav.html" %}
+{% include "_flashes.html" %}
+<form method="get" class="form" style="margin-bottom:.6rem">
+  <input name="q" value="{{ q or '' }}" placeholder="Search title or company…">
+</form>
+<p class="meta">{{ total }} job{{ '' if total == 1 else 's' }}</p>
+<div class="table-wrap"><table class="table">
+  <tr><th>Job</th><th>Category</th><th>Posted</th><th>Actions</th></tr>
+  {% for j in jobs %}
+  <tr>
+    <td><a href="/job/{{ j['id'] }}/{{ j['title']|slug }}">{{ j['title'] }}</a><br>
+        <small>{{ j['company'] }} · {{ j['location'] }}</small>
+        {% if j['featured'] %} <span class="badge gold">★</span>{% endif %}</td>
+    <td>{{ j['category'] }}</td>
+    <td>{{ j['created_at']|ago }}</td>
+    <td class="actions">
+      <a class="btn sm ghost" href="/admin/jobs/{{ j['id'] }}/edit">Edit</a>
+      <form method="post" action="/admin/jobs/{{ j['id'] }}/feature" class="inline-form">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button class="btn sm ghost" type="submit">
+          {{ 'Unfeature' if j['featured'] else 'Feature' }}</button>
+      </form>
+      <form method="post" action="/admin/jobs/{{ j['id'] }}/delete" class="inline-form"
+            onsubmit="return confirm('Delete this job?')">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button class="btn sm danger" type="submit">Delete</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% if pages > 1 %}
+<nav class="pager">
+  {% if page > 1 %}<a href="?q={{ q|urlencode }}&page={{ page-1 }}">← Newer</a>{% else %}<i></i>{% endif %}
+  <span>{{ page }} / {{ pages }}</span>
+  {% if page < pages %}<a href="?q={{ q|urlencode }}&page={{ page+1 }}">Older →</a>{% else %}<i></i>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

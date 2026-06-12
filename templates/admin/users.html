@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Manage Users | Admin | ZimJobs Hub{% endblock %}
+{% block content %}
+{% set active = 'users' %}{% include "admin/_nav.html" %}
+{% include "_flashes.html" %}
+<form method="get" class="form" style="margin-bottom:.6rem">
+  <input name="q" value="{{ q or '' }}" placeholder="Search name or email…">
+</form>
+<p class="meta">{{ total }} user{{ '' if total == 1 else 's' }}</p>
+<div class="table-wrap"><table class="table">
+  <tr><th>User</th><th>Status</th><th>Joined</th><th>Actions</th></tr>
+  {% for u in users %}
+  <tr>
+    <td>{{ u['name'] }}<br><small>{{ u['email'] }}</small>
+        {% if u['role'] == 'admin' %} <span class="badge gold">admin</span>{% endif %}</td>
+    <td>{% if u['is_active'] %}<span class="badge green">active</span>
+        {% else %}<span class="badge red">disabled</span>{% endif %}</td>
+    <td>{{ u['created_at']|ago }}</td>
+    <td class="actions">
+      {% if u['id'] != current_user['id'] %}
+      <form method="post" action="/admin/users/{{ u['id'] }}/toggle-active" class="inline-form">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button class="btn sm ghost" type="submit">
+          {{ 'Disable' if u['is_active'] else 'Enable' }}</button>
+      </form>
+      <form method="post" action="/admin/users/{{ u['id'] }}/toggle-role" class="inline-form">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button class="btn sm ghost" type="submit">
+          {{ 'Demote' if u['role'] == 'admin' else 'Make admin' }}</button>
+      </form>
+      <form method="post" action="/admin/users/{{ u['id'] }}/delete" class="inline-form"
+            onsubmit="return confirm('Delete this user?')">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button class="btn sm danger" type="submit">Delete</button>
+      </form>
+      {% else %}<span class="badge">you</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% if pages > 1 %}
+<nav class="pager">
+  {% if page > 1 %}<a href="?q={{ q|urlencode }}&page={{ page-1 }}">← Newer</a>{% else %}<i></i>{% endif %}
+  <span>{{ page }} / {{ pages }}</span>
+  {% if page < pages %}<a href="?q={{ q|urlencode }}&page={{ page+1 }}">Older →</a>{% else %}<i></i>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

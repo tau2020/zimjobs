@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit Job' if job_id else 'New Job' }} | Admin | ZimJobs Hub{% endblock %}
+{% block content %}
+{% set active = 'jobs' %}{% include "admin/_nav.html" %}
+<article class="card detail">
+  <h1>{{ 'Edit job' if job_id else 'New job' }}</h1>
+  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+  <form method="post" class="form">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <label>Job title <input name="title" required value="{{ job['title'] if job }}"></label>
+    <label>Company <input name="company" required value="{{ job['company'] if job }}"></label>
+    <label>Location <input name="location" required value="{{ job['location'] if job }}"
+           placeholder="e.g. Harare or Remote"></label>
+    <label>Category
+      <select name="category">{% for c in categories %}
+        <option {{ 'selected' if job and job['category'] == c }}>{{ c }}</option>
+      {% endfor %}</select>
+    </label>
+    <label>Summary <textarea name="summary" rows="5" required>{{ job['summary'] if job }}</textarea></label>
+    <label>Apply URL <input name="apply_url" type="url" required value="{{ job['apply_url'] if job }}"></label>
+    <label class="chk"><input type="checkbox" name="featured"
+           {{ 'checked' if job and job['featured'] }}> Featured listing</label>
+    <button class="btn" type="submit">Save job</button>
+  </form>
+</article>
+{% endblock %}

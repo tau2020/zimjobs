@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}My Account | ZimJobs Hub{% endblock %}
+{% block content %}
+<article class="card detail">
+  <h1>My Account</h1>
+  {% include "_flashes.html" %}
+  <form method="post" action="/account/update" class="form">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <label>Full name <input name="name" value="{{ current_user['name'] }}" required></label>
+    <label>Email <input name="email" type="email" value="{{ current_user['email'] }}" required></label>
+    <button class="btn" type="submit">Update profile</button>
+  </form>
+  <h2 style="margin-top:1rem">Change password</h2>
+  <form method="post" action="/account/password" class="form">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <label>Current password <input name="current" type="password" required></label>
+    <label>New password <input name="new" type="password" minlength="8" required></label>
+    <button class="btn ghost" type="submit">Change password</button>
+  </form>
+</article>
+
+<h2 class="meta" style="font-size:1rem">Saved jobs ({{ saved|length }})</h2>
+{% for j in saved %}
+<a class="card {{ 'featured' if j['featured'] }}"
+   href="/job/{{ j['id'] }}/{{ j['title']|slug }}">
+  <h2>{{ j['title'] }}</h2>
+  <p class="firm">{{ j['company'] }} <i>·</i> {{ j['location'] }}</p>
+  <p class="tag"><b>{{ j['category'] }}</b><span>Saved {{ j['saved_at']|ago }}</span></p>
+</a>
+{% else %}
+<div class="card empty"><p>No saved jobs yet.
+   <a href="/">Browse jobs</a> and tap “☆ Save job”.</p></div>
+{% endfor %}
+
+<form method="post" action="/logout" class="inline-form">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <button class="btn danger" type="submit">Logout</button>
+</form>
+{% endblock %}

@@ -265,5 +265,16 @@ def not_found(_):
 
 init_db()
 
+# ---------------------- user & admin modules ------------------------
+import os as _os
+app.secret_key = _os.environ.get("SECRET_KEY") or ADMIN_TOKEN
+
+from auth import auth_bp, init_auth_db   # noqa: E402
+from admin import admin_bp               # noqa: E402
+
+app.register_blueprint(auth_bp)
+app.register_blueprint(admin_bp)
+init_auth_db()
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
