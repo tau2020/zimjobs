@@ -1,0 +1,124 @@
+from __future__ import annotations
+
+import logging
+import os
+import sqlite3
+from dataclasses import asdict
+from pathlib import Path
+from typing import Iterable
+
+from .dedupe import canonical_url_key, normalized_key, similar
+from .models import JobRecord
+
+log = logging.getLogger(__name__)
+
+CORE_COLUMNS = ["title", "company", "location", "category", "summary", "apply_url", "featured", "created_at"]
+OPTIONAL_COLUMNS_SQL = {
+    "source_name": "TEXT",
+    "source_url": "TEXT",
+    "posted_at": "TEXT",
+    "expires_at": "TEXT",
+    "employment_type": "TEXT",
+    "salary_range": "TEXT",
+    "remote_status": "TEXT",
+    "content_hash": "TEXT",
+    "scraped_at": "TEXT",
+}
+
+
+class SQLiteJobRepository:
+    def __init__(self, db_path: str, table_name: str = "jobs", auto_add_optional_columns: bool | None = None):
+        self.db_path = db_path
+        self.table_name = table_name
+        self.auto_add_optional_columns = (
+            os.getenv("AUTO_ADD_OPTIONAL_COLUMNS", "0") == "1" if auto_add_optional_columns is None else auto_add_optional_columns
+        )
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(db_path)
+        self.conn.row_factory = sqlite3.Row
+        self.ensure_schema()
+
+    def close(self) -> None:
+        self.conn.close()
+
+    def ensure_schema(self) -> None:
+        self.conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self.table_name} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                company TEXT NOT NULL,
+                location TEXT NOT NULL,
+                category TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                apply_url TEXT NOT NULL,
+                featured INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        self.conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_name}_apply_url ON {self.table_name}(apply_url)")
+        self.conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_name}_category ON {self.table_name}(category)")
+        self.conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_name}_location ON {self.table_name}(location)")
+        if self.auto_add_optional_columns:
+            existing = self.columns()
+            for col, sql_type in OPTIONAL_COLUMNS_SQL.items():
+                if col not in existing:
+                    self.conn.execute(f"ALTER TABLE {self.table_name} ADD COLUMN {col} {sql_type}")
+                    log.info("db_column_added", extra={"status": col})
+        self.conn.commit()
+
+    def columns(self) -> set[str]:
+        rows = self.conn.execute(f"PRAGMA table_info({self.table_name})").fetchall()
+        return {row["name"] for row in rows}
+
+    def existing_candidates(self) -> list[sqlite3.Row]:
+        cols = self.columns()
+        selected = [c for c in ["id", "title", "company", "location", "summary", "apply_url", "content_hash"] if c in cols]
+        return self.conn.execute(f"SELECT {', '.join(selected)} FROM {self.table_name}").fetchall()
+
+    def exists_duplicate(self, job: JobRecord) -> bool:
+        rows = self.existing_candidates()
+        incoming_url = canonical_url_key(job.apply_url)
+        incoming_key = normalized_key(job)
+        for row in rows:
+            if row["apply_url"] and canonical_url_key(row["apply_url"]) == incoming_url:
+                return True
+            if "content_hash" in row.keys() and row["content_hash"] and job.content_hash and row["content_hash"] == job.content_hash:
+                return True
+            row_key = "|".join([str(row["title"] or "").lower(), str(row["company"] or "").lower(), str(row["location"] or "").lower()])
+            if incoming_key == row_key and similar(row["summary"] or "", job.summary) >= 0.90:
+                return True
+        return False
+
+    def insert(self, job: JobRecord) -> bool:
+        if self.exists_duplicate(job):
+            log.info("db_skip_duplicate", extra={"job_title": job.title, "url": job.apply_url})
+            return False
+        available = self.columns()
+        data = asdict(job)
+        insert_cols = [col for col in CORE_COLUMNS + list(OPTIONAL_COLUMNS_SQL.keys()) if col in available and data.get(col) is not None]
+        placeholders = ", ".join([":" + col for col in insert_cols])
+        sql = f"INSERT INTO {self.table_name} ({', '.join(insert_cols)}) VALUES ({placeholders})"
+        self.conn.execute(sql, {col: data[col] for col in insert_cols})
+        self.conn.commit()
+        log.info("db_inserted", extra={"job_title": job.title, "url": job.apply_url})
+        return True
+
+    def insert_many(self, jobs: Iterable[JobRecord], dry_run: bool = False) -> dict[str, int]:
+        stats = {"inserted": 0, "skipped": 0, "failed": 0}
+        for job in jobs:
+            try:
+                if self.exists_duplicate(job):
+                    stats["skipped"] += 1
+                    continue
+                if dry_run:
+                    log.info("dry_run_insert", extra={"job_title": job.title, "url": job.apply_url})
+                    stats["inserted"] += 1
+                else:
+                    inserted = self.insert(job)
+                    stats["inserted" if inserted else "skipped"] += 1
+            except Exception:
+                stats["failed"] += 1
+                log.exception("db_insert_failed", extra={"job_title": job.title, "url": job.apply_url})
+        return stats

@@ -131,11 +131,10 @@ add_source_file() {
 # ---- Source list (name | url | tmp file) ----
 declare -a SOURCES=(
   "vacancymail|https://vacancymail.co.zw/jobs/|$TMP_DIR/vacancymail.html"
-  "psc|https://erecruitment.psc.gov.zw/|$TMP_DIR/psc.html"
+
   "unicef|https://jobs.unicef.org/cw/en-us/filter/?location=zimbabwe&search-keyword=|$TMP_DIR/unicef.html"
-  "un_zimbabwe|https://zimbabwe.un.org/en/jobs|$TMP_DIR/un_zimbabwe.html"
-  "ihararejobs|https://ihararejobs.com/|$TMP_DIR/ihararejobs.html"
-  "carezimbabwe|https://www.carezimbabwe.org/careers/|$TMP_DIR/carezimbabwe.html"
+
+
 )
 
 for entry in "${SOURCES[@]}"; do

@@ -1,0 +1,47 @@
+[
+  {
+    "name": "applynow_zimbabwe",
+    "type": "applynow",
+    "enabled": true,
+    "start_urls": [
+      "https://applynow.co.zw/destination/zimbabwe/",
+      "https://applynow.co.zw/category/remote/"
+    ],
+    "max_pages": 2,
+    "max_detail_pages": 40,
+    "default_location": "Zimbabwe",
+    "default_category": "Other",
+    "allowed_locations": ["Zimbabwe", "Remote", "Africa", "EMEA", "Harare", "Bulawayo"],
+    "skip_expired": true
+  },
+  {
+    "name": "somewhere_remote",
+    "type": "somewhere",
+    "enabled": true,
+    "start_urls": [
+      "https://jobs.somewhere.com/jobs",
+      "https://recruitcrm.io/jobs/somewhere"
+    ],
+    "max_pages": 1,
+    "max_detail_pages": 40,
+    "default_location": "Remote",
+    "default_category": "Remote",
+    "allowed_locations": ["Remote", "Africa", "EMEA", "South Africa", "Zimbabwe"],
+    "skip_expired": true
+  },
+  {
+    "name": "impactpool_zimbabwe",
+    "type": "impactpool",
+    "enabled": true,
+    "start_urls": [
+      "https://www.impactpool.org/countries/Zimbabwe",
+      "https://www.impactpool.org/jobs/1217853"
+    ],
+    "max_pages": 1,
+    "max_detail_pages": 40,
+    "default_location": "Zimbabwe",
+    "default_category": "NGO & International Development",
+    "allowed_locations": ["Zimbabwe", "Harare", "Remote", "Africa", "Home Based"],
+    "skip_expired": true
+  }
+]
