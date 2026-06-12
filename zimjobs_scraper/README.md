@@ -79,3 +79,58 @@ Daily is enough for these sources:
 ```bash
 PYTHONPATH=src pytest -q
 ```
+
+## Progress view in Railway logs
+
+The scraper includes a line-based progress display designed for Railway/container logs. It avoids live terminal repainting so progress remains readable in the Railway log stream.
+
+Maximum visibility:
+
+```bash
+PYTHONPATH=zimjobs_scraper/src \
+PROGRESS=1 \
+PROGRESS_EVERY=1 \
+DRY_RUN=1 \
+MAX_PAGES=2 \
+MAX_DETAIL_PER_SOURCE=30 \
+python zimjobs_scraper/run_scraper.py \
+  --db /data/jobs.db \
+  --config zimjobs_scraper/config/sources.json \
+  --dry-run
+```
+
+Less noisy logs, print every 5 jobs:
+
+```bash
+PYTHONPATH=zimjobs_scraper/src \
+PROGRESS=1 \
+PROGRESS_EVERY=5 \
+python zimjobs_scraper/run_scraper.py \
+  --db /data/jobs.db \
+  --config zimjobs_scraper/config/sources.json \
+  --progress-every 5
+```
+
+Disable progress output:
+
+```bash
+PYTHONPATH=zimjobs_scraper/src PROGRESS=0 python zimjobs_scraper/run_scraper.py \
+  --db /data/jobs.db \
+  --config zimjobs_scraper/config/sources.json \
+  --no-progress
+```
+
+Example output:
+
+```text
+[zimjobs] ========================================================================
+[zimjobs] Starting scraper | sources=3 | mode=DRY RUN - no database writes
+[zimjobs] Source 1/3: ApplyNOW Zimbabwe Jobs
+[zimjobs]   ApplyNOW Zimbabwe Jobs listing pages 1/1 [██████████████████████] 100% | https://applynow.co.zw/
+[zimjobs]   ApplyNOW Zimbabwe Jobs detail URLs found: 30
+[zimjobs]   ApplyNOW Zimbabwe Jobs parsing 10/30 [███████░░░░░░░░░░░░░░░] 33% | parsed=10 failed=0
+[zimjobs] Validation 18/42 [█████████░░░░░░░░░░░░░] 43% | valid=16 invalid=2
+[zimjobs] Deduplication complete | before=38 after=35 removed=3
+[zimjobs] Database dry-run 35/35 [██████████████████████] 100% | inserted=35 skipped=0 failed=0
+[zimjobs] Finished scraper | inserted=35 skipped=0 failed=0
+```

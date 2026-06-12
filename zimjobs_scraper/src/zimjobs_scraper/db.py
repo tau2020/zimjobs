@@ -5,7 +5,7 @@ import os
 import sqlite3
 from dataclasses import asdict
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from .dedupe import canonical_url_key, normalized_key, similar
 from .models import JobRecord
@@ -105,9 +105,16 @@ class SQLiteJobRepository:
         log.info("db_inserted", extra={"job_title": job.title, "url": job.apply_url})
         return True
 
-    def insert_many(self, jobs: Iterable[JobRecord], dry_run: bool = False) -> dict[str, int]:
+    def insert_many(
+        self,
+        jobs: Iterable[JobRecord],
+        dry_run: bool = False,
+        progress_callback: Callable[[int, int, dict[str, int]], None] | None = None,
+    ) -> dict[str, int]:
+        jobs = list(jobs)
+        total = len(jobs)
         stats = {"inserted": 0, "skipped": 0, "failed": 0}
-        for job in jobs:
+        for index, job in enumerate(jobs, start=1):
             try:
                 if self.exists_duplicate(job):
                     stats["skipped"] += 1
@@ -121,4 +128,7 @@ class SQLiteJobRepository:
             except Exception:
                 stats["failed"] += 1
                 log.exception("db_insert_failed", extra={"job_title": job.title, "url": job.apply_url})
+            finally:
+                if progress_callback:
+                    progress_callback(index, total, stats)
         return stats
