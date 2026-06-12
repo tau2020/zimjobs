@@ -23,6 +23,8 @@ class JobValidator:
         reasons: list[str] = []
         if len(job.title) < 5:
             reasons.append("title_too_short")
+        if len(job.title) > 120 or re.search(r"\|\s*(apply by|deadline|closing date)", job.title, re.I):
+            reasons.append("title_not_clean")
         if len(job.company) < 2:
             reasons.append("company_missing")
         if len(job.summary) < 80:

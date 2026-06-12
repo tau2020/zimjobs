@@ -21,9 +21,9 @@ def test_mapping_into_legacy_fields_preserves_source():
         apply_url="/apply",
     )
     job = map_raw_job(raw, cfg)
-    assert job.title.startswith("UNICEF")
+    assert job.title == "Data Analyst in Zimbabwe"
     assert job.company == "UNICEF"
-    assert job.category in {"Technology", "Healthcare", "Education", "NGO & International Development"}
+    assert job.category == "NGO & Development"
     assert "Source: applynow" in job.summary
 
 
@@ -60,3 +60,47 @@ def test_sqlite_insert_legacy_schema(tmp_path: Path):
     row = con.execute("SELECT title, company, location, category, summary, apply_url FROM jobs").fetchone()
     assert row[0] == "Operations Coordinator"
     assert row[5] == "https://example.com/jobs/2"
+
+
+
+def test_applynow_title_summary_and_remote_category_are_cleaned():
+    cfg = SourceConfig(name="applynow_zimbabwe", type="applynow", start_urls=[], default_location="Zimbabwe", default_category="Private Sector")
+    raw = RawJob(
+        source_name="applynow_zimbabwe",
+        source_url="https://applynow.co.zw/2026/06/12/meraki-labs/",
+        title="Meraki Labs is hiring a Communications and Reporting Officer (Remote) | Apply by 22 June 2026",
+        company=None,
+        location="Zimbabwe",
+        summary="""
+        Meraki Labs is hiring a Communications and Reporting Officer (Remote) | Apply by 22 June 2026
+        Meraki Labs is seeking a Communications and Reporting Officer to support internal and external communications, reporting, project coordination, and operational processes.
+        Contents
+        • Communications and Reporting Officer (Remote) – Meraki Labs
+        • Key Responsibilities
+        • Internal and External Communications Support
+        • Reporting, Editing, and Knowledge Management
+        • Project Coordination and Operational Support
+        • Required Skills
+        • Qualifications and Experience
+        • Working Arrangements
+        • Compensation and Benefits
+        • Application Process
+        • Important Dates
+        • Selection Process
+        Job Title: Communications and Reporting Officer
+        Location: Remote
+        Closing Date: 22 June 2026
+        Contract Type: Full-Time
+        Salary: USD 900 per month
+        This position is ideal for a highly organized communicator with strong writing skills.
+        """,
+        apply_url="https://applynow.co.zw/2026/06/12/meraki-labs/",
+    )
+    job = map_raw_job(raw, cfg)
+    assert job.title == "Communications and Reporting Officer (Remote)"
+    assert job.company == "Meraki Labs"
+    assert job.location == "Remote / Zimbabwe"
+    assert job.category == "Remote & International"
+    assert "Contents" not in job.summary
+    assert "Key Responsibilities" not in job.summary
+    assert "Deadline: 2026-06-22" in job.summary

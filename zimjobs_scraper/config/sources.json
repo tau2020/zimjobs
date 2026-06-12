@@ -10,8 +10,15 @@
     "max_pages": 2,
     "max_detail_pages": 40,
     "default_location": "Zimbabwe",
-    "default_category": "Other",
-    "allowed_locations": ["Zimbabwe", "Remote", "Africa", "EMEA", "Harare", "Bulawayo"],
+    "default_category": "Private Sector",
+    "allowed_locations": [
+      "Zimbabwe",
+      "Remote",
+      "Africa",
+      "EMEA",
+      "Harare",
+      "Bulawayo"
+    ],
     "skip_expired": true
   },
   {
@@ -25,8 +32,14 @@
     "max_pages": 1,
     "max_detail_pages": 40,
     "default_location": "Remote",
-    "default_category": "Remote",
-    "allowed_locations": ["Remote", "Africa", "EMEA", "South Africa", "Zimbabwe"],
+    "default_category": "Remote & International",
+    "allowed_locations": [
+      "Remote",
+      "Africa",
+      "EMEA",
+      "South Africa",
+      "Zimbabwe"
+    ],
     "skip_expired": true
   },
   {
@@ -40,8 +53,14 @@
     "max_pages": 1,
     "max_detail_pages": 40,
     "default_location": "Zimbabwe",
-    "default_category": "NGO & International Development",
-    "allowed_locations": ["Zimbabwe", "Harare", "Remote", "Africa", "Home Based"],
+    "default_category": "NGO & Development",
+    "allowed_locations": [
+      "Zimbabwe",
+      "Harare",
+      "Remote",
+      "Africa",
+      "Home Based"
+    ],
     "skip_expired": true
   }
 ]

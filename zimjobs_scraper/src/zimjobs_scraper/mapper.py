@@ -4,12 +4,14 @@ from datetime import datetime, timezone
 
 from .models import JobRecord, RawJob
 from .normalization import (
+    clean_job_title,
     clean_text,
     content_hash,
     extract_salary,
-    infer_category,
+    find_deadline,
     infer_company,
     make_summary,
+    normalize_category,
     normalize_employment_type,
     normalize_location,
     normalize_remote_status,
@@ -19,26 +21,34 @@ from .parsers import SourceConfig
 
 
 def map_raw_job(raw: RawJob, config: SourceConfig) -> JobRecord:
-    title = clean_text(raw.title)
+    original_title = clean_text(raw.title)
     body = clean_text(raw.summary or raw.description_html or "", max_spaces=False)
-    company = clean_text(raw.company) or infer_company(title, body)
-    location = normalize_location(raw.location, title=title, text=body, default=config.default_location)
-    category = clean_text(raw.category) or infer_category(title, body, default=config.default_category)
+
+    company = clean_text(raw.company) or infer_company(original_title, body)
+    title = clean_job_title(original_title, company=company, text=body)
+    location = normalize_location(raw.location, title=original_title, text=body, default=config.default_location)
+    category = normalize_category(raw.category or config.default_category, title=f"{original_title} {title}", location=location, text=body, default=config.default_category)
     employment_type = clean_text(raw.employment_type) or normalize_employment_type(body)
     salary_range = clean_text(raw.salary_range) or extract_salary(body)
+    expires_at = raw.expires_at or find_deadline(f"{original_title}\n{body}")
     remote_status = clean_text(raw.remote_status) or normalize_remote_status(location, body)
     apply_url = normalize_url(raw.apply_url, raw.source_url) or normalize_url(raw.source_url) or ""
-    summary = make_summary(title, body)
+    summary = make_summary(original_title, body)
 
     # Preserve traceability even when the existing DB has only the legacy `summary` column.
-    source_line = f"\n\nSource: {raw.source_name} | {raw.source_url}"
-    if raw.expires_at:
-        source_line += f" | Deadline: {raw.expires_at}"
+    meta_bits = [f"Source: {raw.source_name}"]
+    if raw.source_url:
+        meta_bits.append(raw.source_url)
+    if expires_at:
+        meta_bits.append(f"Deadline: {expires_at}")
     if employment_type:
-        source_line += f" | Type: {employment_type}"
+        meta_bits.append(f"Type: {employment_type}")
     if salary_range:
-        source_line += f" | Salary: {salary_range}"
-    if len(summary) + len(source_line) <= 1200:
+        meta_bits.append(f"Salary: {salary_range}")
+    if remote_status and remote_status != "On-site":
+        meta_bits.append(f"Workplace: {remote_status}")
+    source_line = "\n\n" + " | ".join(meta_bits)
+    if len(summary) + len(source_line) <= 1100:
         summary = f"{summary}{source_line}"
 
     digest = content_hash([title, company, location, summary, apply_url, raw.source_url])
@@ -53,7 +63,7 @@ def map_raw_job(raw: RawJob, config: SourceConfig) -> JobRecord:
         source_name=raw.source_name,
         source_url=raw.source_url,
         posted_at=raw.posted_at,
-        expires_at=raw.expires_at,
+        expires_at=expires_at,
         employment_type=employment_type,
         salary_range=salary_range,
         remote_status=remote_status,

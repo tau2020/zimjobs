@@ -134,3 +134,23 @@ Example output:
 [zimjobs] Database dry-run 35/35 [██████████████████████] 100% | inserted=35 skipped=0 failed=0
 [zimjobs] Finished scraper | inserted=35 skipped=0 failed=0
 ```
+
+## Quality update: cleaner titles, summaries and site categories
+
+This version maps jobs into the current ZimJobs Hub category filters:
+
+- NGO & Development
+- Government
+- Private Sector
+- Remote & International
+- Internships
+
+It also cleans source-heavy titles such as:
+
+`Meraki Labs is hiring a Communications and Reporting Officer (Remote) | Apply by 22 June 2026`
+
+into:
+
+`Communications and Reporting Officer (Remote)`
+
+Remote signals in title, location or description now override vague source categories like `Other`, so remote roles are saved as `Remote & International`. Generated table-of-contents blocks are removed from summaries before inserting into SQLite.
