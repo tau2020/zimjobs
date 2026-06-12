@@ -154,3 +154,24 @@ into:
 `Communications and Reporting Officer (Remote)`
 
 Remote signals in title, location or description now override vague source categories like `Other`, so remote roles are saved as `Remote & International`. Generated table-of-contents blocks are removed from summaries before inserting into SQLite.
+
+## Quality v3 fixes
+
+This version adds stricter data-quality gates based on real bad records seen in production:
+
+- Promotional headlines such as `The Self-Investigation is hiring: Operations Coordinator (Remote) | Earn EUR 1,400 per month` are normalized to `Operations Coordinator`.
+- Generic titles such as `3 new job positions`, `Jobs | Somewhere`, `Multiple Vacancies`, and `Open Positions` are rejected unless a real role title is found in a labelled field like `Job Title:` or `Position:`.
+- Company values that look like prose/sentence fragments are rejected, for example `is implementing an innovative conservation model...`.
+- ApplyNOW pages now infer company names from patterns such as `Chewore Conservation Trust Zimbabwe Jobs June 2026 – Multiple Vacancies` and `About Chewore Conservation Trust ...`.
+- Somewhere landing/marketing pages are skipped unless a real individual job page is detected. This prevents fake records built from marketing copy such as `Talent On-Demand`.
+- Workplace terms like `(Remote)` are removed from the title and represented through `location` / `category` instead.
+
+Recommended command after deploying this version:
+
+```bash
+cp /data/jobs.db /data/jobs_backup_before_quality_v3_$(date +%Y%m%d_%H%M%S).db
+sqlite3 /data/jobs.db "DELETE FROM jobs;"
+sqlite3 /data/jobs.db "DELETE FROM sqlite_sequence WHERE name='jobs';"
+PYTHONPATH=zimjobs_scraper/src PROGRESS=1 DRY_RUN=1 python zimjobs_scraper/run_scraper.py --db /data/jobs.db --config zimjobs_scraper/config/sources.json --dry-run
+PYTHONPATH=zimjobs_scraper/src PROGRESS=1 DRY_RUN=0 python zimjobs_scraper/run_scraper.py --db /data/jobs.db --config zimjobs_scraper/config/sources.json
+```

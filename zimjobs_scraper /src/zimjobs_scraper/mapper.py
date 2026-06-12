@@ -10,6 +10,7 @@ from .normalization import (
     extract_salary,
     find_deadline,
     infer_company,
+    looks_like_good_company,
     make_summary,
     normalize_category,
     normalize_employment_type,
@@ -24,7 +25,8 @@ def map_raw_job(raw: RawJob, config: SourceConfig) -> JobRecord:
     original_title = clean_text(raw.title)
     body = clean_text(raw.summary or raw.description_html or "", max_spaces=False)
 
-    company = clean_text(raw.company) or infer_company(original_title, body)
+    parsed_company = clean_text(raw.company)
+    company = parsed_company if looks_like_good_company(parsed_company) else infer_company(original_title, body)
     title = clean_job_title(original_title, company=company, text=body)
     location = normalize_location(raw.location, title=original_title, text=body, default=config.default_location)
     category = normalize_category(raw.category or config.default_category, title=f"{original_title} {title}", location=location, text=body, default=config.default_category)

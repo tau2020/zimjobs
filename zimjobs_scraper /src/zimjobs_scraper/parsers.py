@@ -10,7 +10,16 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup, Tag
 
 from .models import RawJob
-from .normalization import clean_html_to_markdownish, clean_text, find_deadline, normalize_url, parse_date
+from .normalization import (
+    clean_html_to_markdownish,
+    clean_text,
+    extract_company_from_text,
+    extract_role_from_text,
+    find_deadline,
+    looks_like_real_role,
+    normalize_url,
+    parse_date,
+)
 
 log = logging.getLogger(__name__)
 
@@ -202,7 +211,11 @@ class ApplyNowParser(GenericParser):
                 node.decompose()
         description = clean_html_to_markdownish(str(article))
         text = clean_text(description, max_spaces=False)
-        company = self._extract_field(text, ["Company", "Organisation", "Organization", "Employer"]) or None
+        company = self._extract_field(text, ["Company", "Organisation", "Organization", "Employer"]) or extract_company_from_text(title, text) or None
+        # If the page headline is generic, try the body for a real role. If none is found, the validator will skip it.
+        role_from_body = extract_role_from_text(text)
+        if role_from_body and not looks_like_real_role(title):
+            title = role_from_body
         location = self._extract_field(text, ["Job Location", "Opportunity Location", "Location"])
         employment_type = self._extract_field(text, ["Contract", "Contract Type", "Employment Type", "Job Type"])
         salary = self._extract_field(text, ["Salary", "Compensation", "Pay"])
@@ -228,12 +241,14 @@ class ApplyNowParser(GenericParser):
         )
 
     def _extract_field(self, text: str, labels: Iterable[str]) -> str | None:
+        # Only accept labelled fields at the start of a line. This avoids treating prose like
+        # "The organisation is implementing..." as the organization/company name.
         for label in labels:
-            pattern = rf"{re.escape(label)}\s*:?\s*([^\n]+)"
-            match = re.search(pattern, text, flags=re.I)
+            pattern = rf"(?im)^\s*(?:[•\-*]\s*)?{re.escape(label)}\s*:\s*([^\n]+)"
+            match = re.search(pattern, text)
             if match:
                 value = clean_text(match.group(1))
-                if value and len(value) < 180:
+                if value and len(value) < 140:
                     return value
         return None
 
@@ -327,8 +342,8 @@ class SomewhereParser(GenericParser):
                 if re.search(r"job|apply|opening|view", f"{path} {text}", re.I):
                     seen.add(href)
                     urls.append(href)
-        if not urls and re.search(r"remote job|open jobs|apply", clean_text(soup.get_text(" ")), re.I):
-            urls.append(base_url)
+        # Do not fall back to the generic Somewhere landing page. It contains marketing
+        # copy, not actual job records, and previously created fake jobs.
         return urls
 
     def parse_detail(self, html: str, url: str) -> RawJob | None:
@@ -336,11 +351,16 @@ class SomewhereParser(GenericParser):
         soup = self._soup(html)
         text = clean_text(soup.get_text("\n"), max_spaces=False)
         title = clean_text((soup.find("h1") or soup.find("title") or Tag(name="")).get_text(" "))
-        if title.lower() in {"jobs", "job page", "somewhere"} or not title:
-            title = self._find_title_in_text(text) or "Remote role via Somewhere"
-        if "are you looking for a remote job" in title.lower():
-            # This is the generic candidate page, not an individual listing.
+        if title.lower() in {"jobs", "job page", "somewhere", "jobs | somewhere"} or not title:
+            title = self._find_title_in_text(text) or ""
+        if (
+            not looks_like_real_role(title)
+            or "are you looking for a remote job" in text.lower()
+            or re.search(r"talent on[- ]demand|hire remote professionals on demand|somewhere browser", text, re.I)
+        ):
+            # This is the generic candidate/marketing page, not an individual listing.
             return None
+        company = self._extract_labeled(text, ["Company", "Client", "Employer", "Hiring Organization"])
         location = self._extract_labeled(text, ["Location", "Work Location"]) or "Remote"
         salary = self._extract_labeled(text, ["Compensation", "Salary"])
         employment_type = self._extract_labeled(text, ["Job Type", "Employment Type"])
@@ -350,7 +370,7 @@ class SomewhereParser(GenericParser):
             source_name=self.config.name,
             source_url=url,
             title=title,
-            company="Somewhere client",
+            company=company,
             location=location,
             category="Remote",
             summary=description or text,

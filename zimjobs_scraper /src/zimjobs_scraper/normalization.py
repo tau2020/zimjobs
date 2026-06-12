@@ -110,6 +110,130 @@ PURE_HEADING_RE = re.compile(
 )
 
 
+ROLE_KEYWORDS = (
+    "officer", "coordinator", "manager", "assistant", "associate", "analyst", "specialist", "developer",
+    "engineer", "designer", "accountant", "consultant", "advisor", "adviser", "lead", "director",
+    "administrator", "clerk", "driver", "nurse", "teacher", "lecturer", "intern", "trainee", "technician",
+    "supervisor", "representative", "executive", "researcher", "auditor", "cashier", "receptionist",
+    "operator", "monitor", "enumerator", "facilitator", "controller", "agent", "architect", "scientist",
+)
+
+GENERIC_TITLE_RE = re.compile(
+    r"^(?:jobs?\s*\|\s*somewhere|jobs?|vacanc(?:y|ies)|multiple\s+vacanc(?:y|ies)|"
+    r"\d+\s+(?:new\s+)?job\s+positions?|career\s+opportunities?|open\s+positions?|"
+    r"various\s+positions?|latest\s+jobs?|remote\s+jobs?|talent\s+on[- ]demand|hire\s+remote\s+professionals)\b",
+    re.I,
+)
+
+PROMO_TITLE_SUFFIX_PATTERNS = [
+    r"\s*\|\s*(?:earn|salary|pay|compensation)\b.*$",
+    r"\s*[-–—]\s*(?:earn|salary|pay|compensation)\b.*$",
+    r"\s*\|\s*(?:remote|work from home|home based)\b.*$",
+]
+
+BAD_COMPANY_RE = re.compile(
+    r"^(?:is|are|was|were|be|being|been|to|and|or|the\s+organisation|the\s+organization|"
+    r"implementing|inviting|seeking|looking|hiring|operating|aimed|based|committed|dedicated)\b",
+    re.I,
+)
+
+
+def looks_like_real_role(value: str | None) -> bool:
+    title = clean_text(value)
+    if not title or GENERIC_TITLE_RE.search(title):
+        return False
+    if len(title) < 5 or len(title) > 120:
+        return False
+    if re.search(r"\b(?:is|are)\s+hiring\b|\bapply\s+by\b|\bdeadline\b|\bclosing\s+date\b", title, re.I):
+        return False
+    if re.search(r"\b(?:jobs?|vacanc(?:y|ies)|positions?)\b", title, re.I) and not any(
+        re.search(rf"\b{re.escape(k)}\b", title, re.I) for k in ROLE_KEYWORDS
+    ):
+        return False
+    return any(re.search(rf"\b{re.escape(k)}\b", title, re.I) for k in ROLE_KEYWORDS)
+
+
+def looks_like_good_company(value: str | None) -> bool:
+    company = clean_text(value)
+    if not company or company.lower() in {"confidential", "n/a", "unknown"}:
+        return False
+    if len(company) < 2 or len(company) > 90:
+        return False
+    if BAD_COMPANY_RE.search(company):
+        return False
+    if re.search(r"\b(?:is|are|was|were|aimed|inviting|seeking|implementing|operating|supporting)\b", company, re.I):
+        # Good company names can contain small words, but not obvious sentence verbs.
+        return False
+    if company.count(" ") >= 8:
+        return False
+    if re.search(r"[.!?]", company):
+        return False
+    return bool(re.search(r"[A-Za-z0-9]", company))
+
+
+def _strip_title_noise(title: str) -> str:
+    title = clean_text(title)
+    for pattern in TITLE_NOISE_PATTERNS + PROMO_TITLE_SUFFIX_PATTERNS:
+        title = re.sub(pattern, "", title, flags=re.I)
+    title = re.sub(r"\s*\((?:remote|hybrid|onsite|on-site|home[- ]based|work from home)\)\s*", " ", title, flags=re.I)
+    title = re.sub(r"\s+[-–—|:]\s*$", "", title)
+    return clean_text(title)
+
+
+def extract_role_from_text(text: str | None) -> str | None:
+    body = clean_text(text or "", max_spaces=False)
+    if not body:
+        return None
+    labels = (
+        "Job Title", "Position Title", "Position", "Role Title", "Role", "Vacancy", "Post", "Title"
+    )
+    for label in labels:
+        # Only accept proper labelled fields at the start of a line, not inline prose.
+        pattern = rf"(?im)^\s*(?:[•\-*]\s*)?{re.escape(label)}\s*:\s*([^\n|•]+)"
+        for match in re.finditer(pattern, body):
+            candidate = _strip_title_noise(match.group(1))
+            if looks_like_real_role(candidate):
+                return candidate
+    # Some ApplyNOW pages have a TOC line like "Operations Coordinator (Remote) – Company".
+    for raw_line in body.splitlines():
+        line = clean_text(re.sub(r"^[•\-*]\s*", "", raw_line))
+        if not line or len(line) > 130:
+            continue
+        line = re.sub(r"\s+[–—-]\s+[A-Z][A-Za-z0-9 &.'’/-]{2,80}$", "", line)
+        candidate = _strip_title_noise(line)
+        if looks_like_real_role(candidate):
+            return candidate
+    return None
+
+
+def extract_company_from_text(title: str | None, text: str | None) -> str | None:
+    heading = clean_text(title)
+    body = clean_text(text or "", max_spaces=False)
+    # ApplyNOW pattern: "Chewore Conservation Trust Zimbabwe Jobs June 2026 – Multiple Vacancies"
+    company_jobs_pattern = r"^([A-Z0-9][A-Za-z0-9 &.'’/-]{2,90}?)\s+(?:Zimbabwe\s+)?Jobs?\s+(?:[A-Za-z]+\s+20\d{2}|20\d{2})\s+[–—-]\s+(?:Multiple\s+Vacanc(?:y|ies)|\d+\s+(?:new\s+)?job\s+positions?)"
+    for candidate_text in [heading, *body.splitlines()[:8]]:
+        match = re.search(company_jobs_pattern, clean_text(candidate_text), flags=re.I)
+        if match and looks_like_good_company(match.group(1)):
+            return clean_text(match.group(1))
+    # Headline pattern: "The Self-Investigation is hiring: Operations Coordinator ..."
+    company, _ = _split_hiring_title(heading)
+    if looks_like_good_company(company):
+        return company
+    rules = [
+        r"(?im)^\s*(?:Company|Organisation|Organization|Employer)\s*:\s*([^\n]{2,90})",
+        r"(?im)^\s*About\s+([A-Z0-9][A-Za-z0-9 &.'’/-]{2,90}?)(?:\s+The\s+(?:organisation|organization|company)\b|\n|$)",
+        r"(?im)^\s*([A-Z0-9][A-Za-z0-9 &.'’/-]{2,90}?)\s+is\s+(?:inviting|seeking|looking|hiring|recruiting)\b",
+        r"(?im)^\s*([A-Z0-9][A-Za-z0-9 &.'’/-]{2,90}?)\s*,\s+(?:operating|based|a\s+registered|an?\s+international)",
+    ]
+    for pattern in rules:
+        for match in re.finditer(pattern, body):
+            candidate = clean_text(match.group(1))
+            candidate = re.sub(r"\s+(?:Zimbabwe\s+)?Jobs?$", "", candidate, flags=re.I)
+            if looks_like_good_company(candidate):
+                return candidate
+    return None
+
+
 def clean_text(value: str | None, max_spaces: bool = True) -> str:
     if not value:
         return ""
@@ -195,63 +319,65 @@ def is_expired(expires_at: str | None) -> bool:
 
 
 def _split_hiring_title(raw_title: str) -> tuple[str | None, str | None]:
-    title = clean_text(raw_title)
-    for pattern in TITLE_NOISE_PATTERNS:
-        title = re.sub(pattern, "", title, flags=re.I)
-    title = clean_text(title)
+    title = _strip_title_noise(raw_title)
     patterns = [
-        r"^(?P<company>.+?)\s+(?:is|are)\s+hiring\s+(?:(?:for|to fill)\s+)?(?:a|an|the)?\s*(?P<title>.+)$",
-        r"^(?P<company>.+?)\s+(?:seeks|is seeking|are seeking)\s+(?:a|an|the)?\s*(?P<title>.+)$",
-        r"^(?P<title>.+?)\s+(?:at|with)\s+(?P<company>[A-Z][A-Za-z0-9 &.,'’/-]{2,80})$",
+        r"^(?P<company>.+?)\s+(?:is|are)\s+hiring\s*:?\s*(?:(?:for|to fill)\s+)?(?:a|an|the)?\s*(?P<title>.+)$",
+        r"^(?P<company>.+?)\s+(?:seeks|is seeking|are seeking|is recruiting|are recruiting)\s*:?\s*(?:a|an|the)?\s*(?P<title>.+)$",
+        r"^(?P<title>.+?)\s+(?:at|with)\s+(?P<company>[A-Z0-9][A-Za-z0-9 &.,'’/-]{2,80})$",
     ]
+    # The \u000e placeholder is removed below; it makes this raw patch easier to read.
+    patterns = [p.replace("\u000e", "") for p in patterns]
     for pattern in patterns:
         match = re.search(pattern, title, flags=re.I)
         if match:
             company = clean_text(match.groupdict().get("company"))
             role = clean_text(match.groupdict().get("title"))
-            role = re.sub(r"^(?:for\s+)?(?:the\s+)?(?:position|role)\s+of\s+", "", role, flags=re.I)
-            if company and role and 2 <= len(company) <= 100 and 5 <= len(role) <= 140:
+            role = re.sub(r"^(?:for\s+)?(?:the\s+)?(?:position|role|post)\s+of\s+", "", role, flags=re.I)
+            role = _strip_title_noise(role)
+            if looks_like_good_company(company) and looks_like_real_role(role):
                 return company, role
     return None, title
 
-
 def clean_job_title(raw_title: str | None, company: str | None = None, text: str | None = None) -> str:
-    """Remove source marketing/deadline wording from a scraped title.
+    """Return a concise role title only, with company, deadline, salary and remote tags removed."""
+    original = clean_text(raw_title)
+    body = clean_text(text or "", max_spaces=False)
+    if not original:
+        candidate = extract_role_from_text(body)
+        return candidate or "Untitled role"
 
-    Example:
-    "Meraki Labs is hiring a Communications and Reporting Officer (Remote) | Apply by 22 June 2026"
-    becomes "Communications and Reporting Officer (Remote)".
-    """
-    title = clean_text(raw_title)
-    if not title:
-        return "Untitled role"
-    _, role = _split_hiring_title(title)
-    title = role or title
-    title = re.sub(r"^(job title|position|role|vacancy)\s*:\s*", "", title, flags=re.I)
-    for pattern in TITLE_NOISE_PATTERNS:
-        title = re.sub(pattern, "", title, flags=re.I)
-    if company:
-        title = re.sub(rf"^\s*{re.escape(clean_text(company))}\s*[-–—:|]\s*", "", title, flags=re.I)
-    title = re.sub(r"\s*\|\s*.*$", "", title) if re.search(r"\|\s*(apply|deadline|closing|job)", title, re.I) else title
-    title = re.sub(r"\s+", " ", title).strip(" -–—:|")
-    # Keep useful workplace tags like (Remote), but remove pure deadline/date tags.
-    title = re.sub(r"\s*\((?:deadline|closing|apply)[^)]+\)", "", title, flags=re.I).strip()
-    max_len = int(os.getenv("MAX_TITLE_CHARS", "95"))
+    company_from_title, role = _split_hiring_title(original)
+    title = role or original
+    title = re.sub(r"^(job title|position title|position|role title|role|vacancy|post)\s*:\s*", "", title, flags=re.I)
+    title = _strip_title_noise(title)
+
+    good_company = clean_text(company) or company_from_title or ""
+    if good_company:
+        title = re.sub(rf"^\s*{re.escape(clean_text(good_company))}\s*[-–—:|]\s*", "", title, flags=re.I)
+        title = _strip_title_noise(title)
+
+    if not looks_like_real_role(title):
+        extracted = extract_role_from_text(body)
+        if extracted:
+            title = extracted
+
+    max_len = int(os.getenv("MAX_TITLE_CHARS", "80"))
     if len(title) > max_len:
         title = title[:max_len].rsplit(" ", 1)[0].rstrip(".,;:-")
-    return title or clean_text(raw_title)[:max_len]
-
+    return clean_text(title) or clean_text(raw_title)[:max_len]
 
 def infer_company(title: str, text: str | None = None) -> str:
+    extracted = extract_company_from_text(title, text)
+    if extracted:
+        return extracted
     company, _ = _split_hiring_title(title)
-    if company:
+    if looks_like_good_company(company):
         return company
     joined = f"{title}\n{text or ''}"
     rules = [
-        r"(?:job|vacancy|opening)\s+at\s+([^\|\n\-–—:]+)",
-        r"at\s+([^\|\n\-–—:]{2,80})\s*(?:\||-|–|—|$)",
-        r"(?:Company|Organisation|Organization|Employer)\s*:?\s*([^\n]{2,80})",
-        r"(?:About|Company)\s+([A-Z][A-Za-z0-9 &.,'’/-]{2,80})",
+        r"(?im)^\s*(?:job|vacancy|opening)\s+at\s+([^\|\n\-–—:]{2,80})",
+        r"(?im)^\s*(?:Company|Organisation|Organization|Employer)\s*:\s*([^\n]{2,80})",
+        r"(?im)^\s*About\s+([A-Z0-9][A-Za-z0-9 &.,'’/-]{2,80}?)(?:\s+The\s+(?:organisation|organization|company)\b|\n|$)",
     ]
     for pattern in rules:
         match = re.search(pattern, joined, flags=re.I | re.M)
@@ -259,10 +385,9 @@ def infer_company(title: str, text: str | None = None) -> str:
             company = clean_text(match.group(1))
             company = re.sub(r"\s+(?:job|vacancy|role|position)$", "", company, flags=re.I)
             company = re.sub(r"\s*\|.*$", "", company).strip()
-            if 2 <= len(company) <= 100:
+            if looks_like_good_company(company):
                 return company
     return "Confidential"
-
 
 def normalize_location(value: str | None, title: str = "", text: str = "", default: str = "Zimbabwe") -> str:
     combined = clean_text(" ".join([value or "", title, text[:900]]))

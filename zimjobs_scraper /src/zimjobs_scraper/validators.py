@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from .models import JobRecord
-from .normalization import is_expired
+from .normalization import is_expired, looks_like_good_company, looks_like_real_role
 
 
 @dataclass(slots=True)
@@ -23,10 +23,14 @@ class JobValidator:
         reasons: list[str] = []
         if len(job.title) < 5:
             reasons.append("title_too_short")
-        if len(job.title) > 120 or re.search(r"\|\s*(apply by|deadline|closing date)", job.title, re.I):
+        if len(job.title) > 120 or re.search(r"\|\s*(apply by|deadline|closing date|earn|salary)", job.title, re.I):
             reasons.append("title_not_clean")
+        if not looks_like_real_role(job.title):
+            reasons.append("title_not_real_role")
         if len(job.company) < 2:
             reasons.append("company_missing")
+        if not looks_like_good_company(job.company):
+            reasons.append("company_not_clean")
         if len(job.summary) < 80:
             reasons.append("summary_too_short")
         parsed = urlparse(job.apply_url)
@@ -40,4 +44,6 @@ class JobValidator:
                 reasons.append("outside_allowed_locations")
         if re.search(r"casino|betting|adult|crypto giveaway|get rich quick", job.title + " " + job.summary, re.I):
             reasons.append("low_quality_or_spam")
+        if re.search(r"talent on[- ]demand|hire remote professionals on demand|browser manage security", job.summary, re.I):
+            reasons.append("marketing_landing_page")
         return ValidationResult(ok=not reasons, reasons=reasons)

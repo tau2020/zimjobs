@@ -97,10 +97,71 @@ def test_applynow_title_summary_and_remote_category_are_cleaned():
         apply_url="https://applynow.co.zw/2026/06/12/meraki-labs/",
     )
     job = map_raw_job(raw, cfg)
-    assert job.title == "Communications and Reporting Officer (Remote)"
+    assert job.title == "Communications and Reporting Officer"
     assert job.company == "Meraki Labs"
     assert job.location == "Remote / Zimbabwe"
     assert job.category == "Remote & International"
     assert "Contents" not in job.summary
     assert "Key Responsibilities" not in job.summary
     assert "Deadline: 2026-06-22" in job.summary
+
+
+def test_quality_v3_strips_company_salary_and_remote_from_title():
+    cfg = SourceConfig(name="applynow_zimbabwe", type="applynow", start_urls=[], default_location="Zimbabwe", default_category="Private Sector")
+    raw = RawJob(
+        source_name="applynow_zimbabwe",
+        source_url="https://applynow.co.zw/2026/06/12/self-investigation/",
+        title="The Self-Investigation is hiring: Operations Coordinator (Remote) | Earn EUR 1,400 per month",
+        company=None,
+        location="Remote",
+        summary="""
+        The Self-Investigation is hiring: Operations Coordinator (Remote) | Earn EUR 1,400 per month
+        Job Title: Operations Coordinator
+        Location: Remote
+        Salary: EUR 1,400 per month
+        The Operations Coordinator will support operations, administration, reporting and team coordination for a remote organization.
+        """,
+        apply_url="https://applynow.co.zw/2026/06/12/self-investigation/",
+    )
+    job = map_raw_job(raw, cfg)
+    assert job.title == "Operations Coordinator"
+    assert job.company == "The Self-Investigation"
+    assert job.category == "Remote & International"
+    assert "EUR 1,400" in job.summary
+
+
+def test_quality_v3_rejects_generic_multi_vacancy_title_and_sentence_company():
+    cfg = SourceConfig(name="applynow_zimbabwe", type="applynow", start_urls=[], default_location="Zimbabwe", default_category="Private Sector")
+    raw = RawJob(
+        source_name="applynow_zimbabwe",
+        source_url="https://applynow.co.zw/2026/06/01/chewore/",
+        title="3 new job positions",
+        company="is implementing an innovative conservation model aimed at securing the long-term protection",
+        location="Zimbabwe",
+        summary="""
+        Chewore Conservation Trust Zimbabwe Jobs June 2026 – Multiple Vacancies
+        Chewore Conservation Trust (CCT), operating under the Awe for Nature Foundation, is inviting qualified professionals to apply.
+        About Chewore Conservation Trust The organisation is implementing an innovative conservation model aimed at securing wilderness.
+        """,
+        apply_url="https://applynow.co.zw/2026/06/01/chewore/",
+    )
+    job = map_raw_job(raw, cfg)
+    assert job.company == "Chewore Conservation Trust"
+    result = JobValidator(skip_expired=False).validate(job)
+    assert not result.ok
+    assert "title_not_real_role" in result.reasons
+
+
+def test_somewhere_marketing_page_is_skipped_by_parser():
+    from zimjobs_scraper.parsers import SomewhereParser
+
+    cfg = SourceConfig(name="somewhere_remote", type="somewhere", start_urls=[], default_location="Remote", default_category="Remote & International")
+    parser = SomewhereParser(cfg)
+    html = """
+    <html><head><title>Jobs | Somewhere</title></head><body>
+    <h1>Jobs | Somewhere</h1>
+    <p>Talent On-Demand Hire remote professionals on demand. No upfront fees.</p>
+    <p>Somewhere Browser Manage security and access with the browser built for enterprise.</p>
+    </body></html>
+    """
+    assert parser.parse_detail(html, "https://somewhere.com/jobs") is None
