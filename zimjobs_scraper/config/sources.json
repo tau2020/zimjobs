@@ -1,5 +1,178 @@
 [
   {
+    "name": "reliefweb_zimbabwe_api",
+    "type": "reliefweb_api",
+    "enabled": true,
+    "start_urls": [
+      "https://api.reliefweb.int/v2/jobs?appname=zimjobs-online&profile=full&limit=100&preset=latest&slim=0&query[value]=Zimbabwe"
+    ],
+    "max_pages": 1,
+    "max_detail_pages": 80,
+    "default_location": "Zimbabwe",
+    "default_category": "NGO & Development",
+    "allowed_locations": ["Zimbabwe", "Harare", "Bulawayo", "Remote", "Africa", "Home Based"],
+    "attribution": "ReliefWeb API. Respect original source copyright and link back to ReliefWeb/original agency.",
+    "legal_status": "Official read-only API; requires appname and quota/rate-limit respect.",
+    "skip_expired": true
+  },
+  {
+    "name": "weworkremotely_rss",
+    "type": "rss",
+    "enabled": true,
+    "start_urls": [
+      "https://weworkremotely.com/remote-jobs.rss",
+      "https://weworkremotely.com/categories/remote-programming-jobs.rss",
+      "https://weworkremotely.com/categories/remote-customer-support-jobs.rss",
+      "https://weworkremotely.com/categories/remote-sales-and-marketing-jobs.rss",
+      "https://weworkremotely.com/categories/remote-management-and-finance-jobs.rss"
+    ],
+    "max_pages": 5,
+    "max_detail_pages": 60,
+    "default_location": "Remote / Worldwide",
+    "default_category": "Remote & International",
+    "allowed_locations": ["Remote", "Worldwide", "Anywhere", "Global", "Africa", "EMEA", "Zimbabwe"],
+    "attribution": "Attribute and direct-link back to We Work Remotely.",
+    "legal_status": "Official public RSS feed; no scraping of application flows.",
+    "skip_expired": true
+  },
+  {
+    "name": "jobicy_remote_api",
+    "type": "jobicy_api",
+    "enabled": true,
+    "start_urls": [
+      "https://jobicy.com/api/v2/remote-jobs?count=100"
+    ],
+    "max_pages": 1,
+    "max_detail_pages": 80,
+    "default_location": "Remote / Worldwide",
+    "default_category": "Remote & International",
+    "allowed_locations": ["Remote", "Worldwide", "Anywhere", "Global", "Africa", "EMEA", "Zimbabwe"],
+    "attribution": "Attribute and direct-link back to Jobicy.com; do not over-poll.",
+    "legal_status": "Official public API/RSS; observe fair-use and redistribution restrictions.",
+    "skip_expired": true
+  },
+  {
+    "name": "remoteok_api",
+    "type": "remoteok_api",
+    "enabled": true,
+    "start_urls": [
+      "https://remoteok.com/api"
+    ],
+    "max_pages": 1,
+    "max_detail_pages": 80,
+    "default_location": "Remote / Worldwide",
+    "default_category": "Remote & International",
+    "allowed_locations": ["Remote", "Worldwide", "Anywhere", "Global", "Africa", "EMEA", "Zimbabwe"],
+    "attribution": "Mention Remote OK as source and direct-link to the Remote OK listing URL.",
+    "legal_status": "Public JSON feed; no redirects or application automation.",
+    "skip_expired": true
+  },
+  {
+    "name": "vacancymail_zimbabwe",
+    "type": "generic",
+    "enabled": true,
+    "start_urls": [
+      "https://vacancymail.co.zw/jobs/"
+    ],
+    "max_pages": 1,
+    "max_detail_pages": 40,
+    "default_location": "Zimbabwe",
+    "default_category": "Private Sector",
+    "allowed_locations": ["Zimbabwe", "Harare", "Bulawayo", "Remote", "Africa", "EMEA"],
+    "legal_status": "Public HTML; verify robots.txt and terms before live crawling.",
+    "skip_expired": true
+  },
+  {
+    "name": "iharare_jobs",
+    "type": "generic",
+    "enabled": true,
+    "start_urls": [
+      "https://ihararejobs.com/"
+    ],
+    "max_pages": 1,
+    "max_detail_pages": 35,
+    "default_location": "Zimbabwe",
+    "default_category": "Private Sector",
+    "allowed_locations": ["Zimbabwe", "Harare", "Bulawayo", "Remote", "Africa", "Home Based"],
+    "legal_status": "Public HTML; verify robots.txt and original-source attribution.",
+    "skip_expired": true
+  },
+  {
+    "name": "psc_zimbabwe_erecruitment",
+    "type": "generic",
+    "enabled": true,
+    "start_urls": [
+      "https://erecruitment.psc.gov.zw/"
+    ],
+    "max_pages": 1,
+    "max_detail_pages": 40,
+    "default_location": "Zimbabwe",
+    "default_category": "Government",
+    "allowed_locations": ["Zimbabwe", "Harare", "Bulawayo", "Government", "Public Service"],
+    "legal_status": "Official public-sector source; never automate login/application submission.",
+    "skip_expired": true
+  },
+  {
+    "name": "unjobs_zimbabwe",
+    "type": "generic",
+    "enabled": true,
+    "start_urls": [
+      "https://unjobs.org/duty_stations/zimbabwe"
+    ],
+    "max_pages": 1,
+    "max_detail_pages": 40,
+    "default_location": "Zimbabwe",
+    "default_category": "NGO & Development",
+    "allowed_locations": ["Zimbabwe", "Harare", "Remote", "Africa", "Home Based"],
+    "legal_status": "Public aggregator; prefer original UN/agency application URLs and link attribution.",
+    "skip_expired": true
+  },
+  {
+    "name": "zimplats_careers",
+    "type": "generic",
+    "enabled": true,
+    "start_urls": [
+      "https://zimplats.com/careers/"
+    ],
+    "max_pages": 1,
+    "max_detail_pages": 25,
+    "default_location": "Zimbabwe",
+    "default_category": "Private Sector",
+    "allowed_locations": ["Zimbabwe", "Harare", "Ngezi", "Selous", "Mhondoro", "Mining"],
+    "legal_status": "Official employer careers page; no application automation.",
+    "skip_expired": true
+  },
+  {
+    "name": "delta_corporation_vacancies",
+    "type": "generic",
+    "enabled": true,
+    "start_urls": [
+      "https://delta.co.zw/vacancies/"
+    ],
+    "max_pages": 1,
+    "max_detail_pages": 25,
+    "default_location": "Zimbabwe",
+    "default_category": "Private Sector",
+    "allowed_locations": ["Zimbabwe", "Harare", "Bulawayo", "Kwekwe", "Mutare"],
+    "legal_status": "Official employer page; may include PDF adverts, keep original URL.",
+    "skip_expired": true
+  },
+  {
+    "name": "msu_vacancies",
+    "type": "generic",
+    "enabled": true,
+    "start_urls": [
+      "https://ww5.msu.ac.zw/vacancies/"
+    ],
+    "max_pages": 1,
+    "max_detail_pages": 30,
+    "default_location": "Zimbabwe",
+    "default_category": "Private Sector",
+    "allowed_locations": ["Zimbabwe", "Gweru", "Zvishavane", "Harare", "University", "Lecturer"],
+    "legal_status": "Official university/public institution page.",
+    "skip_expired": true
+  },
+  {
     "name": "applynow_zimbabwe",
     "type": "applynow",
     "enabled": true,
@@ -11,56 +184,38 @@
     "max_detail_pages": 40,
     "default_location": "Zimbabwe",
     "default_category": "Private Sector",
-    "allowed_locations": [
-      "Zimbabwe",
-      "Remote",
-      "Africa",
-      "EMEA",
-      "Harare",
-      "Bulawayo"
-    ],
-    "skip_expired": true
-  },
-  {
-    "name": "somewhere_remote",
-    "type": "somewhere",
-    "enabled": true,
-    "start_urls": [
-      "https://jobs.somewhere.com/jobs",
-      "https://recruitcrm.io/jobs/somewhere"
-    ],
-    "max_pages": 1,
-    "max_detail_pages": 40,
-    "default_location": "Remote",
-    "default_category": "Remote & International",
-    "allowed_locations": [
-      "Remote",
-      "Africa",
-      "EMEA",
-      "South Africa",
-      "Zimbabwe"
-    ],
+    "allowed_locations": ["Zimbabwe", "Remote", "Africa", "EMEA", "Harare", "Bulawayo"],
+    "legal_status": "Public HTML aggregator; verify original employer/source where possible.",
     "skip_expired": true
   },
   {
     "name": "impactpool_zimbabwe",
     "type": "impactpool",
-    "enabled": true,
+    "enabled": false,
     "start_urls": [
-      "https://www.impactpool.org/countries/Zimbabwe",
-      "https://www.impactpool.org/jobs/1217853"
+      "https://www.impactpool.org/countries/Zimbabwe"
     ],
     "max_pages": 1,
-    "max_detail_pages": 40,
+    "max_detail_pages": 30,
     "default_location": "Zimbabwe",
     "default_category": "NGO & Development",
-    "allowed_locations": [
-      "Zimbabwe",
-      "Harare",
-      "Remote",
-      "Africa",
-      "Home Based"
+    "allowed_locations": ["Zimbabwe", "Harare", "Remote", "Africa", "Home Based"],
+    "legal_status": "High value but partnership/API preferred; enable only after terms review.",
+    "skip_expired": true
+  },
+  {
+    "name": "gitlab_greenhouse_remote",
+    "type": "greenhouse_api",
+    "enabled": false,
+    "start_urls": [
+      "https://boards-api.greenhouse.io/v1/boards/gitlab/jobs?content=true"
     ],
+    "max_pages": 1,
+    "max_detail_pages": 50,
+    "default_location": "Remote / Worldwide",
+    "default_category": "Remote & International",
+    "allowed_locations": ["Remote", "Worldwide", "EMEA", "Africa", "Global"],
+    "legal_status": "Official ATS Job Board API. Disabled by default; enable specific remote-friendly employers after location rules review.",
     "skip_expired": true
   }
 ]

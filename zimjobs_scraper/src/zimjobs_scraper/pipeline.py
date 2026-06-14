@@ -76,10 +76,22 @@ class ScrapePipeline:
         seen: set[str] = set()
         max_detail = int(os.getenv("MAX_DETAIL_PER_SOURCE", str(config.max_detail_pages)))
         start_urls = config.start_urls[: int(os.getenv("MAX_PAGES", str(config.max_pages)))]
+        raw_jobs: list[RawJob] = []
+        parse_failed = 0
         for page_index, start_url in enumerate(start_urls, start=1):
             self.progress.listing_page(config.name, page_index, len(start_urls), start_url)
             html = self.http.get(start_url)
             if not html:
+                continue
+            direct_jobs = parser.parse_listing_payload(html, start_url)
+            if direct_jobs:
+                for raw in direct_jobs:
+                    if len(raw_jobs) >= max_detail:
+                        break
+                    raw_jobs.append(raw)
+                self.progress.parse_progress(config.name, len(raw_jobs), max(len(raw_jobs), 1), len(raw_jobs), parse_failed)
+                if len(raw_jobs) >= max_detail:
+                    break
                 continue
             urls = parser.list_job_urls(html, start_url)
             if not urls and start_url not in seen:
@@ -93,9 +105,7 @@ class ScrapePipeline:
             if len(detail_urls) >= max_detail:
                 break
         log.info("source_detail_urls", extra={"source": config.name, "status": len(detail_urls)})
-        self.progress.detail_urls_found(config.name, len(detail_urls))
-        raw_jobs: list[RawJob] = []
-        parse_failed = 0
+        self.progress.detail_urls_found(config.name, len(detail_urls) + len(raw_jobs))
         details_to_parse = detail_urls[:max_detail]
         for detail_index, url in enumerate(details_to_parse, start=1):
             html = self.http.get(url)

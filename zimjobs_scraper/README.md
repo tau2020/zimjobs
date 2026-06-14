@@ -2,7 +2,7 @@
 
 Production-minded Python scraper and mapping pipeline for the existing `zimjobs.online` Flask/SQLite jobs table.
 
-The current core table supported is:
+The core table supported is still the current legacy table:
 
 ```sql
 id INTEGER PRIMARY KEY,
@@ -16,13 +16,67 @@ featured INTEGER DEFAULT 0,
 created_at TEXT DEFAULT (datetime('now'))
 ```
 
-The scraper keeps this legacy schema safe by inserting only columns that exist. If you later add richer columns like `source_url`, `expires_at`, `job_type`, `salary_range`, `content_hash`, etc., the same pipeline will automatically populate them when present. Set `AUTO_ADD_OPTIONAL_COLUMNS=1` only if you want the scraper to add optional metadata columns itself.
+The scraper inserts only columns that exist. If you later add richer columns like `source_url`, `expires_at`, `job_type`, `salary_range`, `content_hash`, etc., the pipeline will populate them when present. Set `AUTO_ADD_OPTIONAL_COLUMNS=1` only if you want the scraper to add optional metadata columns itself.
 
-## Sources included
+## What changed in this update
 
-- `applynow_zimbabwe`: ApplyNOW Zimbabwe and Remote pages.
-- `impactpool_zimbabwe`: Impactpool Zimbabwe listing and specific NGO job detail pages.
-- `somewhere_remote`: Somewhere candidate/recruiting pages. The public board is dynamic/RecruitCRM-backed, so the parser extracts visible public links where available and skips generic landing pages.
+This version shifts the scraper from weak HTML-only sources toward a safer source mix:
+
+- Official API/RSS sources for remote and NGO jobs.
+- Better Zimbabwe local source coverage.
+- A parser framework that can consume API/RSS payloads directly without fetching every detail page.
+- Disabled-by-default partner/legal-review sources separated into `config/sources_partner_review.json`.
+- Remote-location restriction filtering to avoid adding `US only`, `UK only`, `Europe only`, etc. jobs unless they clearly allow worldwide/Africa/EMEA candidates.
+- ATS support for Greenhouse and Lever public job board APIs.
+- More tests for RSS/API parsers.
+
+## Enabled source types
+
+The default `config/sources.json` includes:
+
+### Official API / RSS sources
+
+- `reliefweb_zimbabwe_api` — ReliefWeb jobs API for Zimbabwe NGO/development jobs.
+- `weworkremotely_rss` — We Work Remotely public RSS feeds.
+- `jobicy_remote_api` — Jobicy public remote jobs API.
+- `remoteok_api` — Remote OK public JSON feed.
+
+### Zimbabwe local / official pages
+
+- `vacancymail_zimbabwe`
+- `iharare_jobs`
+- `psc_zimbabwe_erecruitment`
+- `unjobs_zimbabwe`
+- `zimplats_careers`
+- `delta_corporation_vacancies`
+- `msu_vacancies`
+- `applynow_zimbabwe`
+
+### Disabled by default
+
+- `impactpool_zimbabwe` — useful, but better with legal review or partnership/API.
+- `gitlab_greenhouse_remote` — example Greenhouse ATS source. Enable only after confirming remote-location rules.
+
+Partner/API-first sources are listed separately in:
+
+```text
+config/sources_partner_review.json
+```
+
+## Source compliance rules
+
+This scraper does **not** bypass CAPTCHAs, login walls, paywalls, anti-bot systems, or application flows.
+
+Before live crawling any HTML source, review:
+
+- `robots.txt`
+- terms of service
+- rate limits
+- copyright/database rights
+- attribution requirements
+- whether the site is an original employer source or an aggregator
+
+For API/RSS sources, keep attribution and direct links visible in your job listing page. Do not rewrite job ownership or send users through redirect links when direct links are required.
 
 ## Install
 
@@ -39,29 +93,103 @@ pip install -r requirements.txt
 PYTHONPATH=src DRY_RUN=1 python run_scraper.py --db ./jobs.db --config config/sources.json --dry-run
 ```
 
+For first validation, use a smaller run:
+
+```bash
+PYTHONPATH=src \
+DRY_RUN=1 \
+MAX_PAGES=1 \
+MAX_DETAIL_PER_SOURCE=10 \
+PROGRESS=1 \
+python run_scraper.py --db ./jobs.db --config config/sources.json --dry-run
+```
+
 ## Run against Railway SQLite DB
 
 ```bash
 cd /app
 python3 -m pip install -r requirements.txt
-PYTHONPATH=src DRY_RUN=0 MAX_PAGES=2 MAX_DETAIL_PER_SOURCE=40 python run_scraper.py --db /data/jobs.db --config config/sources.json
+PYTHONPATH=src \
+DRY_RUN=0 \
+MAX_PAGES=1 \
+MAX_DETAIL_PER_SOURCE=40 \
+PROGRESS=1 \
+python run_scraper.py --db /data/jobs.db --config config/sources.json
+```
+
+## Recommended clean refresh on Railway
+
+Back up first, then dry run, then live insert:
+
+```bash
+cp /data/jobs.db /data/jobs_backup_before_source_update_$(date +%Y%m%d_%H%M%S).db
+sqlite3 /data/jobs.db "DELETE FROM jobs;"
+sqlite3 /data/jobs.db "DELETE FROM sqlite_sequence WHERE name='jobs';"
+
+PYTHONPATH=src PROGRESS=1 DRY_RUN=1 MAX_PAGES=1 MAX_DETAIL_PER_SOURCE=20 \
+python run_scraper.py --db /data/jobs.db --config config/sources.json --dry-run
+
+PYTHONPATH=src PROGRESS=1 DRY_RUN=0 MAX_PAGES=1 MAX_DETAIL_PER_SOURCE=40 \
+python run_scraper.py --db /data/jobs.db --config config/sources.json
 ```
 
 ## Recommended cron
 
-Daily is enough for these sources:
+Daily is enough for local sources. API/RSS sources should not be over-polled.
 
 ```cron
-15 6 * * * cd /app && PYTHONPATH=src DRY_RUN=0 MAX_PAGES=2 MAX_DETAIL_PER_SOURCE=40 python run_scraper.py --db /data/jobs.db --config config/sources.json >> /data/scraper.log 2>&1
+15 6 * * * cd /app && PYTHONPATH=src DRY_RUN=0 MAX_PAGES=1 MAX_DETAIL_PER_SOURCE=40 PROGRESS=1 python run_scraper.py --db /data/jobs.db --config config/sources.json >> /data/scraper.log 2>&1
 ```
 
-## How to add a new source
+## Adding Greenhouse / Lever ATS sources
 
-1. Add a new object to `config/sources.json`.
-2. Use `type: "generic"` first.
-3. Add `start_urls`, `default_location`, `default_category`, and `allowed_locations`.
-4. Run a dry run and inspect logs.
-5. If parsing is poor, create a parser class in `src/zimjobs_scraper/parsers.py`, register it in `PARSER_REGISTRY`, and add tests using a saved HTML fixture.
+### Greenhouse
+
+Use the public Job Board API URL pattern:
+
+```text
+https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs?content=true
+```
+
+Example config:
+
+```json
+{
+  "name": "example_greenhouse_remote",
+  "type": "greenhouse_api",
+  "enabled": true,
+  "start_urls": ["https://boards-api.greenhouse.io/v1/boards/example/jobs?content=true"],
+  "default_location": "Remote / Worldwide",
+  "default_category": "Remote & International",
+  "allowed_locations": ["Remote", "Worldwide", "EMEA", "Africa", "Global"],
+  "skip_expired": true
+}
+```
+
+### Lever
+
+Use the public Postings API URL pattern:
+
+```text
+https://api.lever.co/v0/postings/{site}?mode=json
+```
+
+Example config:
+
+```json
+{
+  "name": "example_lever_remote",
+  "type": "lever_api",
+  "enabled": true,
+  "start_urls": ["https://api.lever.co/v0/postings/example?mode=json"],
+  "default_location": "Remote / Worldwide",
+  "default_category": "Remote & International",
+  "allowed_locations": ["Remote", "Worldwide", "EMEA", "Africa", "Global"],
+  "skip_expired": true
+}
+```
+
+Always enable ATS sources one employer at a time and inspect dry-run output before live ingestion.
 
 ## Data quality behavior
 
@@ -73,6 +201,8 @@ Daily is enough for these sources:
 - Skips expired jobs when a deadline is known and `skip_expired` is true.
 - Deduplicates by canonical `apply_url`, title/company/location key, `content_hash` when present, and description similarity.
 - Preserves source traceability in optional columns when available, and appends a source line into `summary` for the legacy schema.
+- Rejects generic landing-page and marketing-copy records.
+- Rejects remote jobs that are clearly restricted to countries Zimbabwe-based candidates cannot normally apply from.
 
 ## Testing
 
@@ -80,98 +210,38 @@ Daily is enough for these sources:
 PYTHONPATH=src pytest -q
 ```
 
-## Progress view in Railway logs
+Current test coverage includes:
 
-The scraper includes a line-based progress display designed for Railway/container logs. It avoids live terminal repainting so progress remains readable in the Railway log stream.
+- ApplyNOW detail parsing.
+- Impactpool detail parsing fixture.
+- RSS feed parsing.
+- Jobicy API parsing.
+- Remote OK API parsing.
+- ReliefWeb API parsing.
+- Mapping, validation, dedupe, and SQLite insertion.
+
+## Progress view in Railway logs
 
 Maximum visibility:
 
 ```bash
-PYTHONPATH=zimjobs_scraper/src \
+PYTHONPATH=src \
 PROGRESS=1 \
 PROGRESS_EVERY=1 \
 DRY_RUN=1 \
-MAX_PAGES=2 \
+MAX_PAGES=1 \
 MAX_DETAIL_PER_SOURCE=30 \
-python zimjobs_scraper/run_scraper.py \
+python run_scraper.py \
   --db /data/jobs.db \
-  --config zimjobs_scraper/config/sources.json \
+  --config config/sources.json \
   --dry-run
-```
-
-Less noisy logs, print every 5 jobs:
-
-```bash
-PYTHONPATH=zimjobs_scraper/src \
-PROGRESS=1 \
-PROGRESS_EVERY=5 \
-python zimjobs_scraper/run_scraper.py \
-  --db /data/jobs.db \
-  --config zimjobs_scraper/config/sources.json \
-  --progress-every 5
 ```
 
 Disable progress output:
 
 ```bash
-PYTHONPATH=zimjobs_scraper/src PROGRESS=0 python zimjobs_scraper/run_scraper.py \
+PYTHONPATH=src PROGRESS=0 python run_scraper.py \
   --db /data/jobs.db \
-  --config zimjobs_scraper/config/sources.json \
+  --config config/sources.json \
   --no-progress
-```
-
-Example output:
-
-```text
-[zimjobs] ========================================================================
-[zimjobs] Starting scraper | sources=3 | mode=DRY RUN - no database writes
-[zimjobs] Source 1/3: ApplyNOW Zimbabwe Jobs
-[zimjobs]   ApplyNOW Zimbabwe Jobs listing pages 1/1 [██████████████████████] 100% | https://applynow.co.zw/
-[zimjobs]   ApplyNOW Zimbabwe Jobs detail URLs found: 30
-[zimjobs]   ApplyNOW Zimbabwe Jobs parsing 10/30 [███████░░░░░░░░░░░░░░░] 33% | parsed=10 failed=0
-[zimjobs] Validation 18/42 [█████████░░░░░░░░░░░░░] 43% | valid=16 invalid=2
-[zimjobs] Deduplication complete | before=38 after=35 removed=3
-[zimjobs] Database dry-run 35/35 [██████████████████████] 100% | inserted=35 skipped=0 failed=0
-[zimjobs] Finished scraper | inserted=35 skipped=0 failed=0
-```
-
-## Quality update: cleaner titles, summaries and site categories
-
-This version maps jobs into the current ZimJobs Hub category filters:
-
-- NGO & Development
-- Government
-- Private Sector
-- Remote & International
-- Internships
-
-It also cleans source-heavy titles such as:
-
-`Meraki Labs is hiring a Communications and Reporting Officer (Remote) | Apply by 22 June 2026`
-
-into:
-
-`Communications and Reporting Officer (Remote)`
-
-Remote signals in title, location or description now override vague source categories like `Other`, so remote roles are saved as `Remote & International`. Generated table-of-contents blocks are removed from summaries before inserting into SQLite.
-
-## Quality v3 fixes
-
-This version adds stricter data-quality gates based on real bad records seen in production:
-
-- Promotional headlines such as `The Self-Investigation is hiring: Operations Coordinator (Remote) | Earn EUR 1,400 per month` are normalized to `Operations Coordinator`.
-- Generic titles such as `3 new job positions`, `Jobs | Somewhere`, `Multiple Vacancies`, and `Open Positions` are rejected unless a real role title is found in a labelled field like `Job Title:` or `Position:`.
-- Company values that look like prose/sentence fragments are rejected, for example `is implementing an innovative conservation model...`.
-- ApplyNOW pages now infer company names from patterns such as `Chewore Conservation Trust Zimbabwe Jobs June 2026 – Multiple Vacancies` and `About Chewore Conservation Trust ...`.
-- Somewhere landing/marketing pages are skipped unless a real individual job page is detected. This prevents fake records built from marketing copy such as `Talent On-Demand`.
-- Workplace terms like `(Remote)` are removed from the title and represented through `location` / `category` instead.
-
-Recommended command after deploying this version:
-
-```bash
-cp /data/jobs.db /data/jobs_backup_before_quality_v3_$(date +%Y%m%d_%H%M%S).db
-sqlite3 /data/jobs.db "DELETE FROM jobs;"
-sqlite3 /data/jobs.db "DELETE FROM sqlite_sequence WHERE name='jobs';"
-PYTHONPATH=zimjobs_scraper/src PROGRESS=1 DRY_RUN=1 python zimjobs_scraper/run_scraper.py --db /data/jobs.db --config zimjobs_scraper/config/sources.json --dry-run
-PYTHONPATH=zimjobs_scraper/src PROGRESS=1 DRY_RUN=0 python zimjobs_scraper/run_scraper.py --db /data/jobs.db --config zimjobs_scraper/config/sources.json
 ```

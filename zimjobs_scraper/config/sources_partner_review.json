@@ -1,0 +1,27 @@
+[
+  {
+    "name": "linkedin_jobs_zimbabwe",
+    "url": "https://www.linkedin.com/jobs/jobs-in-zimbabwe/",
+    "recommended_action": "Do not scrape. Use only for discovery, employer-source validation, or approved/paid partnership/API access."
+  },
+  {
+    "name": "developmentaid_zimbabwe",
+    "url": "https://www.developmentaid.org/jobs-in-zimbabwe",
+    "recommended_action": "Partnership or API/legal review recommended because subscription/protected content may apply."
+  },
+  {
+    "name": "impactpool_zimbabwe",
+    "url": "https://www.impactpool.org/countries/Zimbabwe",
+    "recommended_action": "Useful public discovery source, but partnership/API is safer for production ingestion."
+  },
+  {
+    "name": "cv_people_africa",
+    "url": "https://www.cvpeopleafrica.com/",
+    "recommended_action": "High diaspora value; ask for partner feed/API permission before automated collection."
+  },
+  {
+    "name": "remotive",
+    "url": "https://remotive.com/remote-jobs/rss-feed",
+    "recommended_action": "Remote jobs are useful, but terms/fair-use need explicit review before redistribution on another job board."
+  }
+]

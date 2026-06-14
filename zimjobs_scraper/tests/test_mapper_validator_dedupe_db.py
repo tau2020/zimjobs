@@ -12,7 +12,6 @@ from zimjobs_scraper.validators import JobValidator
 def test_mapping_into_legacy_fields_preserves_source():
     cfg = SourceConfig(name="applynow", type="applynow", start_urls=[], default_location="Zimbabwe", default_category="Other")
     raw = RawJob(
-        
         source_name="applynow",
         source_url="https://applynow.co.zw/job1",
         title="UNICEF seeks Data Analyst in Zimbabwe",
