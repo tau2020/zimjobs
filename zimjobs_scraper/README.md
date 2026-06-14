@@ -107,14 +107,14 @@ python run_scraper.py --db ./jobs.db --config config/sources.json --dry-run
 ## Run against Railway SQLite DB
 
 ```bash
-cd /app
-python3 -m pip install -r requirements.txt
+cd /app/zimjobs_scraper
 PYTHONPATH=src \
 DRY_RUN=0 \
-MAX_PAGES=1 \
+AUTO_ADD_OPTIONAL_COLUMNS=1 \
 MAX_DETAIL_PER_SOURCE=40 \
 PROGRESS=1 \
-python run_scraper.py --db /data/jobs.db --config config/sources.json
+python run_scraper.py --db "${DB_PATH:-/data/jobs.db}" --config config/sources.json
+sqlite3 "${DB_PATH:-/data/jobs.db}" "SELECT id, title, company, created_at FROM jobs ORDER BY id DESC LIMIT 10;"
 ```
 
 ## Recommended clean refresh on Railway
@@ -127,19 +127,23 @@ sqlite3 /data/jobs.db "DELETE FROM jobs;"
 sqlite3 /data/jobs.db "DELETE FROM sqlite_sequence WHERE name='jobs';"
 
 PYTHONPATH=src PROGRESS=1 DRY_RUN=1 MAX_PAGES=1 MAX_DETAIL_PER_SOURCE=20 \
-python run_scraper.py --db /data/jobs.db --config config/sources.json --dry-run
+python run_scraper.py --db "${DB_PATH:-/data/jobs.db}" --config config/sources.json --dry-run
 
-PYTHONPATH=src PROGRESS=1 DRY_RUN=0 MAX_PAGES=1 MAX_DETAIL_PER_SOURCE=40 \
-python run_scraper.py --db /data/jobs.db --config config/sources.json
+PYTHONPATH=src PROGRESS=1 DRY_RUN=0 AUTO_ADD_OPTIONAL_COLUMNS=1 MAX_DETAIL_PER_SOURCE=40 \
+python run_scraper.py --db "${DB_PATH:-/data/jobs.db}" --config config/sources.json
 ```
 
-## Recommended cron
+## Daily Railway cron
 
 Daily is enough for local sources. API/RSS sources should not be over-polled.
 
-```cron
-15 6 * * * cd /app && PYTHONPATH=src DRY_RUN=0 MAX_PAGES=1 MAX_DETAIL_PER_SOURCE=40 PROGRESS=1 python run_scraper.py --db /data/jobs.db --config config/sources.json >> /data/scraper.log 2>&1
-```
+The main Docker image starts Alpine `crond` beside Gunicorn. By default it runs `/app/run_daily_scraper.sh` daily at `15 6 * * *` UTC and appends output to `/data/scraper.log`.
+
+Useful Railway variables:
+
+- `SCRAPER_CRON_SCHEDULE=15 6 * * *` controls the daily schedule.
+- `ENABLE_SCRAPER_CRON=0` disables the scheduler.
+- `MAX_DETAIL_PER_SOURCE=40` controls the daily detail-page limit.
 
 ## Adding Greenhouse / Lever ATS sources
 

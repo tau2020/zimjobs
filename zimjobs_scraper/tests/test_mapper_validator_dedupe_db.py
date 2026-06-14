@@ -99,9 +99,11 @@ def test_sqlite_auto_adds_enriched_optional_columns(tmp_path: Path):
     )
     stats = repo.insert_many([job])
     cols = repo.columns()
+    total_jobs = repo.count_jobs()
     row = repo.conn.execute("SELECT department, requirements, external_job_id, job_description FROM jobs").fetchone()
     repo.close()
     assert stats["inserted"] == 1
+    assert total_jobs == 1
     assert {"department", "requirements", "external_job_id", "job_description"}.issubset(cols)
     assert row[0] == "Ministry of Information"
     assert row[2] == "A/GEN/13/21"

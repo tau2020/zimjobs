@@ -136,3 +136,19 @@ class SQLiteJobRepository:
                 if progress_callback:
                     progress_callback(index, total, stats)
         return stats
+
+    def count_jobs(self) -> int:
+        row = self.conn.execute(f"SELECT COUNT(*) AS count FROM {self.table_name}").fetchone()
+        return int(row["count"])
+
+    def rebuild_fts_if_present(self) -> bool:
+        row = self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (f"{self.table_name}_fts",),
+        ).fetchone()
+        if not row:
+            return False
+        self.conn.execute(f"INSERT INTO {self.table_name}_fts({self.table_name}_fts) VALUES('rebuild')")
+        self.conn.commit()
+        log.info("db_fts_rebuilt", extra={"status": f"{self.table_name}_fts"})
+        return True

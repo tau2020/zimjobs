@@ -254,7 +254,11 @@ def sw():
 
 @app.route("/health")
 def health():
-    return {"status": "ok"}
+    try:
+        jobs_count = get_db().execute("SELECT COUNT(*) AS count FROM jobs").fetchone()["count"]
+    except sqlite3.Error:
+        jobs_count = None
+    return {"status": "ok", "jobs": jobs_count}
 
 
 @app.errorhandler(404)

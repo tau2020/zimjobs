@@ -147,6 +147,7 @@ def run(
     sources = load_sources(config_path)
     progress = ProgressReporter.from_env(enabled=show_progress, every=progress_every)
     progress.start(len(sources), dry_run)
+    log.info("scraper_target", extra={"config_path": str(config_path), "db_path": str(db_path), "table": table_name, "status": "dry_run" if dry_run else "live"})
     pipeline = ScrapePipeline(sources, progress=progress)
     jobs = pipeline.collect()
     repo = SQLiteJobRepository(db_path, table_name=table_name)
@@ -158,6 +159,9 @@ def run(
                 current, total, current_stats["inserted"], current_stats["skipped"], current_stats["failed"], dry_run
             ),
         )
+        if not dry_run:
+            stats["fts_rebuilt"] = int(repo.rebuild_fts_if_present())
+        stats["total_jobs"] = repo.count_jobs()
     finally:
         repo.close()
     log.info("pipeline_finished", extra={**stats, "status": "done"})

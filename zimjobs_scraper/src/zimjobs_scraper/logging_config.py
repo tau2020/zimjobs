@@ -30,6 +30,11 @@ class JsonFormatter(logging.Formatter):
             "invalid",
             "listing_pages",
             "reason",
+            "db_path",
+            "config_path",
+            "table",
+            "total_jobs",
+            "fts_rebuilt",
         }
         for key, value in record.__dict__.items():
             if key.startswith("job_") or key in extra_keys:

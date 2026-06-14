@@ -25,17 +25,17 @@ To ensure the SQLite database is kept persistent and updated daily, configure yo
      sqlite3 /data/jobs.db "SELECT COUNT(*) FROM jobs;"
      ```
 
-5. **Create a separate Railway Cron service**:
-   * Create a new service in your Railway project choosing the same repository (`tau2020/zimjobs`).
-   * Set the **Start Command** for this cron service to:
-     ```bash
-     bash scrape_jobs.sh /data/jobs.db
-     ```
-   * Set the **Schedule** to run daily (using UTC timezone):
+5. **Daily scraper cron**:
+   * The Docker image starts Alpine `crond` beside Gunicorn.
+   * The live Flask app and scraper both use `DB_PATH=/data/jobs.db`, so scraped jobs are written to the same persistent SQLite database that the website reads.
+   * The default schedule is:
      ```text
-     0 6 * * *
+     15 6 * * *
      ```
-   * **Note**: The Railway Cron service will run on the specified cron schedule (which is in UTC), execute the scraper, and then exit. The main Flask web service should not run the scraper on startup.
+     This runs daily at 06:15 UTC, which is 08:15 in Africa/Harare.
+   * To change the schedule, set `SCRAPER_CRON_SCHEDULE` on Railway.
+   * To disable the cron without changing the image, set `ENABLE_SCRAPER_CRON=0`.
+   * Cron output is appended to `/data/scraper.log`.
 
 ---
 
@@ -44,7 +44,21 @@ To ensure the SQLite database is kept persistent and updated daily, configure yo
 You can run the scraper manually at any time to import new job listings:
 
 ```bash
-bash scrape_jobs.sh /data/jobs.db
+cd /app/zimjobs_scraper
+PYTHONPATH=src DRY_RUN=0 AUTO_ADD_OPTIONAL_COLUMNS=1 PROGRESS=1 \
+python run_scraper.py --db "${DB_PATH:-/data/jobs.db}" --config config/sources.json
+```
+
+If you are inside Railway SSH, verify you are writing to the same DB the web app uses:
+
+```bash
+echo "DB_PATH=${DB_PATH:-/data/jobs.db}"
+ls -lah /data
+sqlite3 /data/jobs.db "SELECT COUNT(*) FROM jobs;"
+cd /app/zimjobs_scraper
+PYTHONPATH=src DRY_RUN=0 AUTO_ADD_OPTIONAL_COLUMNS=1 PROGRESS=1 \
+python run_scraper.py --db "${DB_PATH:-/data/jobs.db}" --config config/sources.json
+sqlite3 /data/jobs.db "SELECT id, title, company, created_at FROM jobs ORDER BY id DESC LIMIT 10;"
 ```
 
 ---
