@@ -20,10 +20,12 @@ class RawJob:
     apply_url: str | None = None
     posted_at: str | None = None
     expires_at: str | None = None
+    department: str | None = None
     employment_type: str | None = None
     salary_range: str | None = None
     remote_status: str | None = None
     external_id: str | None = None
+    requirements: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -45,8 +47,12 @@ class JobRecord:
     source_url: str | None = None
     posted_at: str | None = None
     expires_at: str | None = None
+    department: str | None = None
     employment_type: str | None = None
     salary_range: str | None = None
     remote_status: str | None = None
+    job_description: str | None = None
+    requirements: str | None = None
+    external_job_id: str | None = None
     content_hash: str | None = None
     scraped_at: str | None = None

@@ -17,8 +17,22 @@ class JsonFormatter(logging.Formatter):
         }
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
+        extra_keys = {
+            "source",
+            "url",
+            "status",
+            "inserted",
+            "skipped",
+            "failed",
+            "count",
+            "total",
+            "valid",
+            "invalid",
+            "listing_pages",
+            "reason",
+        }
         for key, value in record.__dict__.items():
-            if key.startswith("job_") or key in {"source", "url", "status", "inserted", "skipped", "failed"}:
+            if key.startswith("job_") or key in extra_keys:
                 payload[key] = value
         return json.dumps(payload, ensure_ascii=False)
 

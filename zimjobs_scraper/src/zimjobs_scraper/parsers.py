@@ -15,7 +15,9 @@ from .normalization import (
     clean_html_to_markdownish,
     clean_text,
     extract_company_from_text,
+    extract_labeled_value,
     extract_role_from_text,
+    extract_section,
     find_deadline,
     looks_like_good_company,
     looks_like_real_role,
@@ -36,10 +38,21 @@ class SourceConfig:
     max_detail_pages: int = 40
     default_location: str = "Zimbabwe"
     default_category: str = "Other"
+    default_company: str | None = None
     allowed_locations: list[str] = field(default_factory=list)
     skip_expired: bool = True
     attribution: str | None = None
     legal_status: str | None = None
+    site_type: str | None = None
+    ats_type: str | None = None
+    careers_url: str | None = None
+    pagination_strategy: str = "auto"
+    selectors: dict[str, str] = field(default_factory=dict)
+    api_endpoint: str | None = None
+    notes: str | None = None
+    include_url_patterns: list[str] = field(default_factory=list)
+    exclude_url_patterns: list[str] = field(default_factory=list)
+    allow_external_detail_urls: bool = False
 
     @classmethod
     def from_dict(cls, data: dict) -> "SourceConfig":
@@ -52,10 +65,21 @@ class SourceConfig:
             max_detail_pages=int(data.get("max_detail_pages", data.get("max_detail_pages", 40))),
             default_location=data.get("default_location", "Zimbabwe"),
             default_category=data.get("default_category", "Other"),
+            default_company=data.get("default_company"),
             allowed_locations=list(data.get("allowed_locations", [])),
             skip_expired=bool(data.get("skip_expired", True)),
             attribution=data.get("attribution"),
             legal_status=data.get("legal_status"),
+            site_type=data.get("site_type"),
+            ats_type=data.get("ats_type"),
+            careers_url=data.get("careers_url"),
+            pagination_strategy=data.get("pagination_strategy", "auto"),
+            selectors=dict(data.get("selectors", {})),
+            api_endpoint=data.get("api_endpoint"),
+            notes=data.get("notes"),
+            include_url_patterns=list(data.get("include_url_patterns", [])),
+            exclude_url_patterns=list(data.get("exclude_url_patterns", [])),
+            allow_external_detail_urls=bool(data.get("allow_external_detail_urls", False)),
         )
 
 
@@ -77,6 +101,89 @@ class BaseParser:
         detail-page scraping.
         """
         return []
+
+    def list_pagination_urls(self, html: str, base_url: str) -> list[str]:
+        if self.config.pagination_strategy in {"none", "disabled", "off"}:
+            return []
+        soup = self._soup(html)
+        urls: list[str] = []
+        seen: set[str] = set()
+        selectors = [
+            'a[rel~="next"]',
+            "a.next",
+            "a.nextpostslink",
+            "a.page-numbers",
+            'a[aria-label*="Next" i]',
+            'a[title*="Next" i]',
+        ]
+        custom_selector = self.config.selectors.get("pagination_links")
+        if custom_selector:
+            selectors.insert(0, custom_selector)
+        for selector in selectors:
+            for a in soup.select(selector):
+                if not isinstance(a, Tag) or not a.get("href"):
+                    continue
+                href = normalize_url(a.get("href"), base_url)
+                if href and href not in seen and self._looks_like_listing_url(href, base_url):
+                    seen.add(href)
+                    urls.append(href)
+        for a in soup.find_all("a", href=True):
+            text = clean_text(a.get_text(" "))
+            href = normalize_url(a["href"], base_url)
+            if not href or href in seen:
+                continue
+            if re.fullmatch(r"(next|older|more|load more|>|>>|»|next page)", text, re.I) and self._looks_like_listing_url(href, base_url):
+                seen.add(href)
+                urls.append(href)
+        return urls
+
+    def _same_origin(self, url: str, base_url: str) -> bool:
+        parsed = urlparse(url)
+        base = urlparse(base_url)
+        return parsed.netloc.lower() == base.netloc.lower()
+
+    def _matches_any(self, value: str, patterns: Iterable[str]) -> bool:
+        for pattern in patterns:
+            if not pattern:
+                continue
+            try:
+                if re.search(pattern, value, flags=re.I):
+                    return True
+            except re.error:
+                if pattern.lower() in value.lower():
+                    return True
+        return False
+
+    def _is_excluded_url(self, url: str) -> bool:
+        defaults = [
+            r"#",
+            r"mailto:",
+            r"tel:",
+            r"javascript:",
+            r"/login\b",
+            r"/register\b",
+            r"/privacy",
+            r"/terms",
+            r"/contact",
+            r"/wp-login",
+            r"/feed/?$",
+            r"/author/",
+            r"/tag/",
+        ]
+        return self._matches_any(url, [*defaults, *self.config.exclude_url_patterns])
+
+    def _allowed_by_config_patterns(self, url: str) -> bool:
+        if not self.config.include_url_patterns:
+            return True
+        return self._matches_any(url, self.config.include_url_patterns)
+
+    def _looks_like_listing_url(self, url: str, base_url: str) -> bool:
+        if not self._same_origin(url, base_url):
+            return False
+        if self._is_excluded_url(url):
+            return False
+        path_query = f"{urlparse(url).path}?{urlparse(url).query}".lower()
+        return bool(re.search(r"(/page/\d+/?|\bpage=\d+\b|\bpaged=\d+\b|\boffset=\d+\b)", path_query))
 
     def _soup(self, html: str) -> BeautifulSoup:
         return BeautifulSoup(html, "html.parser")
@@ -137,6 +244,8 @@ class BaseParser:
                         posted_at=parse_date(node.get("datePosted")),
                         expires_at=parse_date(node.get("validThrough")),
                         employment_type=node.get("employmentType"),
+                        department=node.get("industry") if isinstance(node.get("industry"), str) else None,
+                        requirements=clean_html_to_markdownish(node.get("qualifications") or node.get("skills")),
                         extra={"json_ld": True},
                     )
                 )
@@ -146,22 +255,41 @@ class BaseParser:
 class GenericParser(BaseParser):
     """Fallback parser for simple HTML pages and screenshots copied as HTML/text."""
 
-    JOB_URL_PATTERNS = ("/jobs/", "/job/", "/careers/", "/career/", "/vacanc", "/202", "/opportun")
+    JOB_URL_PATTERNS = ("/jobs/", "/job/", "/careers/", "/career/", "/vacanc", "/position", "/202", "/opportun")
 
     def list_job_urls(self, html: str, base_url: str) -> list[str]:
         soup = self._soup(html)
         urls: list[str] = []
         seen: set[str] = set()
-        for a in soup.find_all("a", href=True):
+        anchors: list[Tag] = []
+        selector = self.config.selectors.get("job_links")
+        if selector:
+            for node in soup.select(selector):
+                if isinstance(node, Tag):
+                    if node.name == "a" and node.get("href"):
+                        anchors.append(node)
+                    anchors.extend([a for a in node.find_all("a", href=True) if isinstance(a, Tag)])
+        anchors.extend([a for a in soup.find_all("a", href=True) if isinstance(a, Tag)])
+        for a in anchors:
             text = clean_text(a.get_text(" "))
             href = normalize_url(a["href"], base_url)
             if not href or href in seen:
                 continue
+            if href.rstrip("/") == base_url.rstrip("/") and re.search(r"jobs?|vacanc|careers?", text, re.I):
+                continue
+            if not self.config.allow_external_detail_urls and not self._same_origin(href, base_url):
+                continue
+            if self._is_excluded_url(href):
+                continue
+            if not self._allowed_by_config_patterns(href):
+                continue
             path = urlparse(href).path.lower()
-            if any(pat in path for pat in self.JOB_URL_PATTERNS) or re.search(r"job|vacanc|hiring|apply|career|opportun", text, flags=re.I):
+            if self._looks_like_listing_url(href, base_url):
+                continue
+            if any(pat in path for pat in self.JOB_URL_PATTERNS) or re.search(r"job|vacanc|hiring|apply|career|opportun|opening|position", text, flags=re.I):
                 seen.add(href)
                 urls.append(href)
-        if not urls and re.search(r"job|vacanc|hiring|apply|career|opportun", clean_text(soup.get_text(" ")), flags=re.I):
+        if not urls and not self.config.include_url_patterns and re.search(r"job|vacanc|hiring|apply|career|opportun", clean_text(soup.get_text(" ")), flags=re.I):
             urls.append(base_url)
         return urls
 
@@ -170,7 +298,7 @@ class GenericParser(BaseParser):
         json_jobs = self._json_ld_jobs(soup, url)
         if json_jobs:
             return json_jobs[0]
-        title = clean_text((soup.find("h1") or soup.find("title") or Tag(name="")).get_text(" "))
+        title = clean_text((soup.find("h1") or Tag(name="")).get_text(" ")) or self._meta(soup, "og:title", "twitter:title") or clean_text((soup.find("title") or Tag(name="")).get_text(" "))
         if not title:
             return None
         main = soup.find("main") or soup.find("article") or soup.find("body") or soup
@@ -178,9 +306,17 @@ class GenericParser(BaseParser):
             for node in main.select(bad_selector):
                 node.decompose()
         description = clean_html_to_markdownish(str(main))
-        company = self._meta(soup, "article:author", "author") or extract_company_from_text(title, description)
+        company = (
+            extract_labeled_value(description, ["Company", "Organisation", "Organization", "Employer", "Hiring Organization"])
+            or self._meta(soup, "article:author", "author")
+            or extract_company_from_text(title, description)
+        )
         apply_url = self._find_apply_url(soup, url) or url
         location = self._extract_labeled(description, ["Location", "Opportunity Location", "Duty Station", "Work Location"]) or self.config.default_location
+        posted = self._meta(soup, "article:published_time", "datePublished", "date") or self._extract_labeled(description, ["Posted", "Date Posted", "Publication Date"])
+        employment_type = self._extract_labeled(description, ["Employment Type", "Job Type", "Contract", "Contract Type", "Opportunity Type"])
+        department = self._extract_labeled(description, ["Department", "Team", "Unit", "Programme", "Program"])
+        salary = self._extract_labeled(description, ["Salary", "Compensation", "Pay"])
         return RawJob(
             source_name=self.config.name,
             source_url=url,
@@ -191,7 +327,12 @@ class GenericParser(BaseParser):
             summary=description,
             description_html=str(main),
             apply_url=apply_url,
+            posted_at=parse_date(posted),
             expires_at=find_deadline(description),
+            department=department,
+            employment_type=employment_type,
+            salary_range=salary,
+            requirements=extract_section(description, ["Requirements", "Qualifications", "Qualifications and Experience", "Required Skills"]),
         )
 
     def _find_apply_url(self, soup: BeautifulSoup, base_url: str) -> str | None:
@@ -301,6 +442,8 @@ class JobicyApiParser(BaseParser):
             title = item.get("jobTitle") or item.get("title")
             company = item.get("companyName") or item.get("company")
             link = item.get("url") or item.get("jobUrl") or item.get("jobSlug") or url
+            tags = item.get("jobIndustry") or item.get("jobLevel") or item.get("jobType")
+            department = ", ".join(clean_text(str(t)) for t in tags if clean_text(str(t))) if isinstance(tags, list) else clean_text(str(tags)) if tags else None
             jobs.append(
                 RawJob(
                     source_name=self.config.name,
@@ -313,9 +456,11 @@ class JobicyApiParser(BaseParser):
                     description_html=description_html,
                     apply_url=normalize_url(link, url) or url,
                     posted_at=parse_date(item.get("pubDate") or item.get("publishedAt")),
+                    department=department,
                     employment_type=item.get("jobType"),
                     remote_status="Remote",
                     external_id=str(item.get("id") or item.get("jobSlug") or "") or None,
+                    requirements=extract_section(clean_html_to_markdownish(description_html), ["Requirements", "Qualifications", "Required Skills"]),
                     extra={"attribution": self.config.attribution, "api": "jobicy"},
                 )
             )
@@ -358,10 +503,12 @@ class RemoteOkApiParser(BaseParser):
                     description_html=description_html,
                     apply_url=source_url,
                     posted_at=parse_date(item.get("date") or item.get("epoch")),
+                    department=", ".join(clean_text(str(tag)) for tag in tags[:5] if clean_text(str(tag))) if tags else None,
                     employment_type=item.get("type"),
                     salary_range=salary,
                     remote_status="Remote",
                     external_id=str(item.get("id") or "") or None,
+                    requirements=extract_section(clean_html_to_markdownish(description_html), ["Requirements", "Qualifications", "Required Skills"]),
                     extra={"tags": tags, "attribution": self.config.attribution, "api": "remoteok"},
                 )
             )
@@ -403,6 +550,7 @@ class ReliefWebApiParser(BaseParser):
             title = fields.get("title")
             description = fields.get("body-html") or fields.get("body") or fields.get("description") or ""
             url_alias = fields.get("url_alias") or item.get("href") or url
+            department = self._join_names(fields.get("career_categories")) or self._join_names(fields.get("theme"))
             jobs.append(
                 RawJob(
                     source_name=self.config.name,
@@ -416,8 +564,10 @@ class ReliefWebApiParser(BaseParser):
                     apply_url=normalize_url(fields.get("how_to_apply") or url_alias, "https://reliefweb.int") or normalize_url(url_alias, "https://reliefweb.int") or url,
                     posted_at=parse_date(fields.get("date", {}).get("created") if isinstance(fields.get("date"), dict) else fields.get("date")),
                     expires_at=parse_date(fields.get("date", {}).get("closing") if isinstance(fields.get("date"), dict) else fields.get("date.closing")),
+                    department=department or None,
                     employment_type=fields.get("career_categories", [{}])[0].get("name") if isinstance(fields.get("career_categories"), list) and fields.get("career_categories") else None,
                     external_id=str(item.get("id") or "") or None,
+                    requirements=extract_section(clean_html_to_markdownish(description), ["Requirements", "Qualifications", "Required Skills"]),
                     extra={"attribution": self.config.attribution, "api": "reliefweb"},
                 )
             )
@@ -473,6 +623,11 @@ class GreenhouseApiParser(BaseParser):
             description_html = item.get("content") or ""
             absolute_url = item.get("absolute_url") or url
             company = self._company_from_url(absolute_url) or self.config.name.replace("_", " ").title()
+            departments = item.get("departments") or []
+            department = None
+            if isinstance(departments, list) and departments:
+                names = [clean_text(d.get("name")) for d in departments if isinstance(d, dict) and d.get("name")]
+                department = ", ".join([name for name in names if name]) or None
             jobs.append(
                 RawJob(
                     source_name=self.config.name,
@@ -485,8 +640,10 @@ class GreenhouseApiParser(BaseParser):
                     description_html=description_html,
                     apply_url=normalize_url(absolute_url, url) or url,
                     posted_at=parse_date(item.get("updated_at")),
+                    department=department,
                     external_id=str(item.get("id") or "") or None,
                     remote_status="Remote" if re.search(r"remote|global|worldwide|emea|africa", location, re.I) else None,
+                    requirements=extract_section(clean_html_to_markdownish(description_html), ["Requirements", "Qualifications", "Required Skills"]),
                     extra={"api": "greenhouse"},
                 )
             )
@@ -535,9 +692,11 @@ class LeverApiParser(BaseParser):
                     summary=clean_html_to_markdownish(description_html),
                     description_html=description_html,
                     apply_url=normalize_url(hosted_url, url) or url,
+                    department=categories.get("team") if isinstance(categories, dict) else None,
                     employment_type=categories.get("commitment") if isinstance(categories, dict) else None,
                     external_id=str(item.get("id") or "") or None,
                     remote_status="Remote" if re.search(r"remote|global|worldwide|emea|africa", location + description_html, re.I) else None,
+                    requirements=extract_section(description_html, ["Requirements", "Qualifications", "Required Skills"]),
                     extra={"api": "lever"},
                 )
             )
@@ -589,6 +748,7 @@ class ApplyNowParser(GenericParser):
         if not company:
             company = extract_company_from_text(title, text)
         location = self._extract_field(text, ["Location", "Opportunity Location", "Duty Station", "Work Location"]) or self.config.default_location
+        department = self._extract_field(text, ["Department", "Team", "Unit", "Programme", "Program"])
         employment_type = self._extract_field(text, ["Contract", "Contract Type", "Opportunity Type", "Employment Type", "Job Type"])
         salary = self._extract_field(text, ["Salary", "Compensation", "Pay"])
         posted = self._meta(soup, "article:published_time") or self._meta(soup, "article:modified_time")
@@ -608,8 +768,10 @@ class ApplyNowParser(GenericParser):
             apply_url=apply_url,
             posted_at=parse_date(posted),
             expires_at=find_deadline(f"{title}\n{text}"),
+            department=department,
             employment_type=employment_type,
             salary_range=salary,
+            requirements=extract_section(text, ["Requirements", "Qualifications", "Qualifications and Experience", "Required Skills"]),
         )
 
     def _extract_field(self, text: str, labels: Iterable[str]) -> str | None:
@@ -686,6 +848,83 @@ class ImpactPoolParser(GenericParser):
             if href and urlparse(href).netloc and urlparse(href).netloc != base_host:
                 if not any(blocked in href for blocked in ["facebook.com", "linkedin.com", "instagram.com", "twitter.com"]):
                     return href
+        return None
+
+
+class PscERecruitmentParser(GenericParser):
+    def list_job_urls(self, html: str, base_url: str) -> list[str]:
+        soup = self._soup(html)
+        urls: list[str] = []
+        seen: set[str] = set()
+        for a in soup.find_all("a", href=True):
+            href = normalize_url(a["href"], base_url)
+            if not href or href in seen:
+                continue
+            if re.search(r"^https://erecruitment\.psc\.gov\.zw/jobs/\d+/?$", href, re.I):
+                seen.add(href)
+                urls.append(href)
+        return urls
+
+    def parse_detail(self, html: str, url: str) -> RawJob | None:
+        soup = self._soup(html)
+        title = clean_text((soup.find("h1") or Tag(name="")).get_text(" "))
+        if not title:
+            return None
+        main = soup.find("main") or soup.find("body") or soup
+        for bad_selector in ["nav", "header", "footer", "script", "style", "form"]:
+            for node in main.select(bad_selector):
+                node.decompose()
+        description = clean_html_to_markdownish(str(main))
+        text = clean_text(description, max_spaces=False)
+        location = self._extract_location(text) or self.config.default_location
+        reference = self._extract_labeled(text, ["Ref", "Reference"])
+        vacancy_no = self._extract_labeled(text, ["Vacancy No", "Vacancy Number"])
+        return RawJob(
+            source_name=self.config.name,
+            source_url=url,
+            title=title,
+            company="Public Service Commission Zimbabwe",
+            location=location,
+            category=self.config.default_category,
+            summary=description,
+            description_html=str(main),
+            apply_url=url,
+            expires_at=find_deadline(text) or self._extract_deadline(text),
+            department=self._extract_department(text),
+            employment_type=self._extract_labeled(text, ["Employment Type", "Job Type"]) or self._first_line_after_title(text, title),
+            external_id=reference or vacancy_no or urlparse(url).path.rstrip("/").split("/")[-1],
+            requirements=extract_section(text, ["Requirements & Qualifications", "Requirements", "Qualifications"]),
+            extra={"reference": reference, "vacancy_no": vacancy_no},
+        )
+
+    def _extract_location(self, text: str) -> str | None:
+        for line in text.splitlines():
+            value = clean_text(line)
+            if re.search(r"\b(?:Harare|Bulawayo|Zimbabwe|Gweru|Mutare|Masvingo)\b", value, re.I):
+                return value
+        return None
+
+    def _extract_department(self, text: str) -> str | None:
+        for line in text.splitlines():
+            value = clean_text(line)
+            if re.search(r"\b(?:Ministry|Department|Commission|Office of)\b", value, re.I) and len(value) < 180:
+                return value
+        return None
+
+    def _first_line_after_title(self, text: str, title: str) -> str | None:
+        lines = [clean_text(line) for line in text.splitlines() if clean_text(line)]
+        for index, line in enumerate(lines):
+            if line == title and index + 1 < len(lines):
+                candidate = lines[index + 1]
+                if re.search(r"full[- ]time|part[- ]time|contract|temporary|intern", candidate, re.I):
+                    return candidate
+        return None
+
+    def _extract_deadline(self, text: str) -> str | None:
+        lines = [clean_text(line) for line in text.splitlines() if clean_text(line)]
+        for index, line in enumerate(lines):
+            if re.fullmatch(r"application deadline|deadline|closing date", line, re.I) and index + 1 < len(lines):
+                return parse_date(lines[index + 1])
         return None
 
 
@@ -772,6 +1011,7 @@ PARSER_REGISTRY = {
     "lever_api": LeverApiParser,
     "applynow": ApplyNowParser,
     "impactpool": ImpactPoolParser,
+    "psc_erecruitment": PscERecruitmentParser,
     "somewhere": SomewhereParser,
 }
 

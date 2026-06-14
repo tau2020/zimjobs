@@ -74,13 +74,26 @@
     "start_urls": [
       "https://vacancymail.co.zw/jobs/"
     ],
-    "max_pages": 1,
+    "max_pages": 3,
     "max_detail_pages": 40,
     "default_location": "Zimbabwe",
     "default_category": "Private Sector",
     "allowed_locations": ["Zimbabwe", "Harare", "Bulawayo", "Remote", "Africa", "EMEA"],
     "legal_status": "Public HTML; verify robots.txt and terms before live crawling.",
-    "skip_expired": true
+    "skip_expired": true,
+    "site_type": "job_board",
+    "pagination_strategy": "auto",
+    "include_url_patterns": [
+      "^https://vacancymail\\.co\\.zw/jobs/[^/?#]+-\\d+/?$"
+    ],
+    "exclude_url_patterns": [
+      "/jobs/?$",
+      "/candidate",
+      "/employer",
+      "/login",
+      "/register"
+    ],
+    "notes": "Job details use /jobs/{slug}-{id}/. Archive and account pages should not be parsed as jobs."
   },
   {
     "name": "iharare_jobs",
@@ -99,18 +112,29 @@
   },
   {
     "name": "psc_zimbabwe_erecruitment",
-    "type": "generic",
+    "type": "psc_erecruitment",
     "enabled": true,
     "start_urls": [
       "https://erecruitment.psc.gov.zw/"
     ],
-    "max_pages": 1,
+    "max_pages": 3,
     "max_detail_pages": 40,
     "default_location": "Zimbabwe",
     "default_category": "Government",
     "allowed_locations": ["Zimbabwe", "Harare", "Bulawayo", "Government", "Public Service"],
     "legal_status": "Official public-sector source; never automate login/application submission.",
-    "skip_expired": true
+    "skip_expired": true,
+    "site_type": "government_portal",
+    "pagination_strategy": "auto",
+    "include_url_patterns": [
+      "^https://erecruitment\\.psc\\.gov\\.zw/jobs/\\d+/?$"
+    ],
+    "exclude_url_patterns": [
+      "/login",
+      "/register",
+      "/dashboard"
+    ],
+    "notes": "Public listing exposes /jobs/{id} detail pages and page=N pagination. Application requires login and is not automated."
   },
   {
     "name": "unjobs_zimbabwe",
@@ -138,9 +162,25 @@
     "max_detail_pages": 25,
     "default_location": "Zimbabwe",
     "default_category": "Private Sector",
+    "default_company": "Zimplats",
     "allowed_locations": ["Zimbabwe", "Harare", "Ngezi", "Selous", "Mhondoro", "Mining"],
     "legal_status": "Official employer careers page; no application automation.",
-    "skip_expired": true
+    "skip_expired": true,
+    "site_type": "employer_careers",
+    "ats_type": "manatal_careers_page",
+    "allow_external_detail_urls": true,
+    "include_url_patterns": [
+      "^https://www\\.careers-page\\.com/implats/job/[A-Za-z0-9]+/?$"
+    ],
+    "exclude_url_patterns": [
+      "/apply",
+      "/refer",
+      "facebook\\.com",
+      "linkedin\\.com",
+      "twitter\\.com",
+      "mailto:"
+    ],
+    "notes": "Zimplats careers page links to Implats/Manatal public job detail pages on careers-page.com."
   },
   {
     "name": "delta_corporation_vacancies",
@@ -153,6 +193,7 @@
     "max_detail_pages": 25,
     "default_location": "Zimbabwe",
     "default_category": "Private Sector",
+    "default_company": "Delta Corporation",
     "allowed_locations": ["Zimbabwe", "Harare", "Bulawayo", "Kwekwe", "Mutare"],
     "legal_status": "Official employer page; may include PDF adverts, keep original URL.",
     "skip_expired": true
@@ -168,9 +209,19 @@
     "max_detail_pages": 30,
     "default_location": "Zimbabwe",
     "default_category": "Private Sector",
+    "default_company": "Midlands State University",
     "allowed_locations": ["Zimbabwe", "Gweru", "Zvishavane", "Harare", "University", "Lecturer"],
     "legal_status": "Official university/public institution page.",
-    "skip_expired": true
+    "skip_expired": true,
+    "site_type": "employer_careers",
+    "include_url_patterns": [
+      "^https://ww5\\.msu\\.ac\\.zw/vacancies/.+",
+      "^https://apply\\.msu\\.ac\\.zw/.+vacanc"
+    ],
+    "exclude_url_patterns": [
+      "/applyonline/?$"
+    ],
+    "notes": "Current public page only exposes an Apply Online portal link; explicit patterns prevent ingesting the portal page as a job."
   },
   {
     "name": "applynow_zimbabwe",
@@ -180,13 +231,26 @@
       "https://applynow.co.zw/destination/zimbabwe/",
       "https://applynow.co.zw/category/remote/"
     ],
-    "max_pages": 2,
+    "max_pages": 6,
     "max_detail_pages": 40,
     "default_location": "Zimbabwe",
     "default_category": "Private Sector",
     "allowed_locations": ["Zimbabwe", "Remote", "Africa", "EMEA", "Harare", "Bulawayo"],
     "legal_status": "Public HTML aggregator; verify original employer/source where possible.",
-    "skip_expired": true
+    "skip_expired": true,
+    "site_type": "wordpress_aggregator",
+    "pagination_strategy": "auto",
+    "include_url_patterns": [
+      "^https://applynow\\.co\\.zw/20\\d{2}/\\d{2}/\\d{2}/[^/?#]+/?$"
+    ],
+    "exclude_url_patterns": [
+      "/category/",
+      "/tag/",
+      "/author/",
+      "/privacy",
+      "/terms"
+    ],
+    "notes": "WordPress archive pages expose job detail posts by dated slug; page/N pagination is safe within max_pages."
   },
   {
     "name": "impactpool_zimbabwe",

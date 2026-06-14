@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from zimjobs_scraper.parsers import ApplyNowParser, ImpactPoolParser, SourceConfig
+from zimjobs_scraper.parsers import ApplyNowParser, GenericParser, ImpactPoolParser, PscERecruitmentParser, SourceConfig
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -131,3 +131,98 @@ def test_reliefweb_api_parser_extracts_jobs():
     assert jobs[0].company == "World Vision"
     assert jobs[0].location == "Harare, Zimbabwe"
     assert jobs[0].expires_at == "2026-06-30"
+
+
+def test_generic_parser_uses_include_patterns_and_skips_listing_self_link():
+    cfg = SourceConfig(
+        name="vacancymail_zimbabwe",
+        type="generic",
+        start_urls=[],
+        include_url_patterns=[r"^https://vacancymail\.co\.zw/jobs/[^/?#]+-\d+/?$"],
+    )
+    parser = GenericParser(cfg)
+    html = """
+    <html><body>
+      <a href="/jobs/">Jobs</a>
+      <a href="/jobs/project-officer-67828/">Project Officer</a>
+      <a href="/candidate/login">Candidate Login</a>
+      <a href="/jobs/?page=2">Next</a>
+    </body></html>
+    """
+    urls = parser.list_job_urls(html, "https://vacancymail.co.zw/jobs/")
+    assert urls == ["https://vacancymail.co.zw/jobs/project-officer-67828/"]
+
+
+def test_generic_parser_discovers_pagination_links():
+    cfg = SourceConfig(name="x", type="generic", start_urls=[])
+    parser = GenericParser(cfg)
+    html = """<html><body><a class="next page-numbers" href="/jobs/page/2/">Next</a></body></html>"""
+    assert parser.list_pagination_urls(html, "https://example.com/jobs/") == ["https://example.com/jobs/page/2/"]
+
+
+def test_json_ld_parser_preserves_enriched_fields():
+    cfg = SourceConfig(name="jsonld", type="generic", start_urls=[], default_location="Zimbabwe")
+    parser = GenericParser(cfg)
+    html = """
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "JobPosting",
+      "title": "Monitoring and Evaluation Officer",
+      "hiringOrganization": {"name": "Example NGO"},
+      "description": "<p>Lead project monitoring.</p>",
+      "industry": "Programmes",
+      "qualifications": "<p>Degree in statistics and three years of experience.</p>",
+      "datePosted": "2026-06-01",
+      "validThrough": "2026-06-30",
+      "url": "https://example.org/jobs/me-officer"
+    }
+    </script>
+    """
+    raw = parser.parse_detail(html, "https://example.org/jobs/me-officer")
+    assert raw is not None
+    assert raw.department == "Programmes"
+    assert "Degree in statistics" in raw.requirements
+
+
+def test_generic_parser_prefers_h1_over_branded_meta_title():
+    cfg = SourceConfig(name="manatal", type="generic", start_urls=[], default_location="Zimbabwe")
+    parser = GenericParser(cfg)
+    html = """
+    <html><head><meta property="og:title" content="Zimplats Apprenticeship Programme - Implats | Career Page"></head>
+    <body><main><h1>Zimplats Apprenticeship Programme</h1><p>Zimbabwe Platinum Mines is recruiting apprentices in Zimbabwe.</p></main></body></html>
+    """
+    raw = parser.parse_detail(html, "https://www.careers-page.com/implats/job/RY7597V6")
+    assert raw is not None
+    assert raw.title == "Zimplats Apprenticeship Programme"
+
+
+def test_psc_parser_extracts_detail_without_login_apply_url():
+    cfg = SourceConfig(
+        name="psc_zimbabwe_erecruitment",
+        type="psc_erecruitment",
+        start_urls=[],
+        default_location="Zimbabwe",
+        default_category="Government",
+    )
+    parser = PscERecruitmentParser(cfg)
+    html = """
+    <html><body><main>
+      <h1>Deputy Director, Monitoring and Evaluation</h1>
+      <p>Full-time</p><p>Ref: A/GEN/13/21</p><p>Vacancy No: 28</p>
+      <p>Ministry of Information, Publicity and Broadcasting Services</p>
+      <p>Harare, Zimbabwe</p>
+      <h2>Application Deadline</h2><p>June 18, 2026</p>
+      <a href="/login">Sign in to Apply</a>
+      <h2>Role Overview</h2><p>Coordinate monitoring and evaluation work.</p>
+      <h2>Requirements & Qualifications</h2><ul><li>A degree in Monitoring and Evaluation.</li></ul>
+    </main></body></html>
+    """
+    raw = parser.parse_detail(html, "https://erecruitment.psc.gov.zw/jobs/172")
+    assert raw is not None
+    assert raw.company == "Public Service Commission Zimbabwe"
+    assert raw.apply_url == "https://erecruitment.psc.gov.zw/jobs/172"
+    assert raw.external_id == "A/GEN/13/21"
+    assert raw.location == "Harare, Zimbabwe"
+    assert raw.expires_at == "2026-06-18"
+    assert "Monitoring and Evaluation" in raw.requirements

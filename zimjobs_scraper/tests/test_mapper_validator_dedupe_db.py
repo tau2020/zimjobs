@@ -37,6 +37,21 @@ def test_validator_rejects_bad_url():
     assert "apply_url_invalid" in result.reasons or "summary_too_short" in result.reasons
 
 
+def test_mapping_uses_default_company_when_extraction_is_noisy():
+    cfg = SourceConfig(name="zimplats_careers", type="generic", start_urls=[], default_company="Zimplats", default_location="Zimbabwe")
+    raw = RawJob(
+        source_name="zimplats_careers",
+        source_url="https://www.careers-page.com/implats/job/RY7597V6",
+        title="Zimplats Apprenticeship Programme",
+        company="the job Zimplats Apprenticeship Programme",
+        location="Zimbabwe",
+        summary="About the job Zimplats Apprenticeship Programme Zimbabwe Platinum Mines is recruiting apprenticeship trainees in Zimbabwe.",
+        apply_url="https://www.careers-page.com/implats/job/RY7597V6",
+    )
+    job = map_raw_job(raw, cfg)
+    assert job.company == "Zimplats"
+
+
 def test_dedupe_by_url():
     cfg = SourceConfig(name="x", type="generic", start_urls=[])
     raw1 = RawJob(source_name="x", source_url="https://example.com/jobs/1", title="Finance Officer", company="Org", location="Harare", summary="A long finance role description " * 10, apply_url="https://example.com/jobs/1")
@@ -60,6 +75,36 @@ def test_sqlite_insert_legacy_schema(tmp_path: Path):
     row = con.execute("SELECT title, company, location, category, summary, apply_url FROM jobs").fetchone()
     assert row[0] == "Operations Coordinator"
     assert row[5] == "https://example.com/jobs/2"
+
+
+def test_sqlite_auto_adds_enriched_optional_columns(tmp_path: Path):
+    db_path = tmp_path / "jobs.db"
+    repo = SQLiteJobRepository(str(db_path), auto_add_optional_columns=True)
+    cfg = SourceConfig(name="psc", type="psc_erecruitment", start_urls=[], default_category="Government")
+    job = map_raw_job(
+        RawJob(
+            source_name="psc",
+            source_url="https://erecruitment.psc.gov.zw/jobs/172",
+            title="Deputy Director, Monitoring and Evaluation",
+            company="Public Service Commission Zimbabwe",
+            location="Harare, Zimbabwe",
+            category="Government",
+            summary="Coordinate monitoring and evaluation work for a ministry. Requirements: A degree in Monitoring and Evaluation and six years relevant experience.",
+            apply_url="https://erecruitment.psc.gov.zw/jobs/172",
+            department="Ministry of Information",
+            requirements="A degree in Monitoring and Evaluation.",
+            external_id="A/GEN/13/21",
+        ),
+        cfg,
+    )
+    stats = repo.insert_many([job])
+    cols = repo.columns()
+    row = repo.conn.execute("SELECT department, requirements, external_job_id, job_description FROM jobs").fetchone()
+    repo.close()
+    assert stats["inserted"] == 1
+    assert {"department", "requirements", "external_job_id", "job_description"}.issubset(cols)
+    assert row[0] == "Ministry of Information"
+    assert row[2] == "A/GEN/13/21"
 
 
 
@@ -128,6 +173,49 @@ def test_quality_v3_strips_company_salary_and_remote_from_title():
     assert job.company == "The Self-Investigation"
     assert job.category == "Remote & International"
     assert "EUR 1,400" in job.summary
+
+
+def test_applynow_job_title_on_next_line_beats_toc_heading():
+    cfg = SourceConfig(name="applynow_zimbabwe", type="applynow", start_urls=[], default_location="Zimbabwe", default_category="Private Sector")
+    raw = RawJob(
+        source_name="applynow_zimbabwe",
+        source_url="https://applynow.co.zw/2026/06/14/innovare-health/",
+        title="Innovare Health Collective is recruiting Reproductive Health & Family Planning Consultants (USD 200-300/Day)",
+        company=None,
+        location="Africa",
+        summary="""
+        Innovare Health Collective Hiring Consultants Across Africa for Kenya Reproductive Health Project Paying Up to USD 300 Per Day
+        The Role
+        How to Apply
+        Job Title:
+        Consultant - Reproductive Health and Family Planning Market Analysis Project
+        Innovare Health Collective is expanding its consultant network across Africa.
+        Requirements:
+        Five years of reproductive health consulting experience.
+        """,
+        apply_url="https://applynow.co.zw/2026/06/14/innovare-health/",
+    )
+    job = map_raw_job(raw, cfg)
+    assert job.title == "Consultant - Reproductive Health and Family Planning Market Analysis Project"
+    assert job.company == "Innovare Health Collective"
+
+
+def test_applynow_inline_job_title_after_how_to_apply_is_cleaned():
+    cfg = SourceConfig(name="applynow_zimbabwe", type="applynow", start_urls=[], default_location="Zimbabwe", default_category="Private Sector")
+    raw = RawJob(
+        source_name="applynow_zimbabwe",
+        source_url="https://applynow.co.zw/2026/06/14/innovare-health/",
+        title="Innovare Health Collective is recruiting Reproductive Health & Family Planning Consultants (USD 200-300/Day)",
+        company=None,
+        location="Africa",
+        summary="""
+        How to Apply Job Title: Consultant - Reproductive Health and Family Planning Market Analysis Project
+        Innovare Health Collective is expanding its consultant network across Africa.
+        """,
+        apply_url="https://applynow.co.zw/2026/06/14/innovare-health/",
+    )
+    job = map_raw_job(raw, cfg)
+    assert job.title == "Consultant - Reproductive Health and Family Planning Market Analysis Project"
 
 
 def test_quality_v3_rejects_generic_multi_vacancy_title_and_sentence_company():

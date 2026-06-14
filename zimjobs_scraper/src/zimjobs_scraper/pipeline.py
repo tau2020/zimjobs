@@ -73,13 +73,21 @@ class ScrapePipeline:
     def _collect_source(self, config: SourceConfig) -> list[RawJob]:
         parser = make_parser(config)
         detail_urls: list[str] = []
-        seen: set[str] = set()
+        seen_detail_urls: set[str] = set()
+        seen_listing_urls: set[str] = set()
         max_detail = int(os.getenv("MAX_DETAIL_PER_SOURCE", str(config.max_detail_pages)))
-        start_urls = config.start_urls[: int(os.getenv("MAX_PAGES", str(config.max_pages)))]
+        max_listing_pages = max(1, int(os.getenv("MAX_PAGES", str(config.max_pages))))
+        listing_queue = list(config.start_urls[:max_listing_pages])
         raw_jobs: list[RawJob] = []
         parse_failed = 0
-        for page_index, start_url in enumerate(start_urls, start=1):
-            self.progress.listing_page(config.name, page_index, len(start_urls), start_url)
+        page_index = 0
+        while listing_queue and page_index < max_listing_pages:
+            start_url = listing_queue.pop(0)
+            if start_url in seen_listing_urls:
+                continue
+            seen_listing_urls.add(start_url)
+            page_index += 1
+            self.progress.listing_page(config.name, page_index, max_listing_pages, start_url)
             html = self.http.get(start_url)
             if not html:
                 continue
@@ -94,17 +102,21 @@ class ScrapePipeline:
                     break
                 continue
             urls = parser.list_job_urls(html, start_url)
-            if not urls and start_url not in seen:
-                urls = [start_url]
             for url in urls:
-                if url not in seen:
-                    seen.add(url)
+                if url not in seen_detail_urls:
+                    seen_detail_urls.add(url)
                     detail_urls.append(url)
                 if len(detail_urls) >= max_detail:
                     break
+            for next_url in parser.list_pagination_urls(html, start_url):
+                if next_url not in seen_listing_urls and next_url not in listing_queue and len(seen_listing_urls) + len(listing_queue) < max_listing_pages:
+                    listing_queue.append(next_url)
             if len(detail_urls) >= max_detail:
                 break
-        log.info("source_detail_urls", extra={"source": config.name, "status": len(detail_urls)})
+        log.info(
+            "source_detail_urls",
+            extra={"source": config.name, "status": len(detail_urls), "listing_pages": len(seen_listing_urls)},
+        )
         self.progress.detail_urls_found(config.name, len(detail_urls) + len(raw_jobs))
         details_to_parse = detail_urls[:max_detail]
         for detail_index, url in enumerate(details_to_parse, start=1):

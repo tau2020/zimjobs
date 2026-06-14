@@ -116,6 +116,8 @@ ROLE_KEYWORDS = (
     "administrator", "clerk", "driver", "nurse", "teacher", "lecturer", "intern", "trainee", "technician",
     "supervisor", "representative", "executive", "researcher", "auditor", "cashier", "receptionist",
     "operator", "monitor", "enumerator", "facilitator", "controller", "agent", "architect", "scientist",
+    "drivers", "operators", "agronomist", "mechanic", "mechanics", "apprentice", "apprenticeship",
+    "learnership", "consultants",
 )
 
 GENERIC_TITLE_RE = re.compile(
@@ -132,7 +134,7 @@ PROMO_TITLE_SUFFIX_PATTERNS = [
 ]
 
 BAD_COMPANY_RE = re.compile(
-    r"^(?:is|are|was|were|be|being|been|to|and|or|the\s+organisation|the\s+organization|"
+    r"^(?:is|are|was|were|be|being|been|to|and|or|the\s+organisation|the\s+organization|the\s+job|"
     r"implementing|inviting|seeking|looking|hiring|operating|aimed|based|committed|dedicated)\b",
     re.I,
 )
@@ -185,7 +187,7 @@ def extract_role_from_text(text: str | None) -> str | None:
     if not body:
         return None
     labels = (
-        "Job Title", "Position Title", "Position", "Role Title", "Role", "Vacancy", "Post", "Title"
+        "Job Title", "Position Title", "Position", "Role Title", "Role", "Vacancy", "Post", "Title", "Job Opportunity"
     )
     for label in labels:
         # Only accept proper labelled fields at the start of a line, not inline prose.
@@ -194,10 +196,25 @@ def extract_role_from_text(text: str | None) -> str | None:
             candidate = _strip_title_noise(match.group(1))
             if looks_like_real_role(candidate):
                 return candidate
+    lines = [clean_text(re.sub(r"^[•\-*]\s*", "", line)) for line in body.splitlines()]
+    for index, line in enumerate(lines):
+        if not any(re.fullmatch(rf"{re.escape(label)}\s*:?", line, flags=re.I) for label in labels):
+            continue
+        for next_line in lines[index + 1 : index + 4]:
+            candidate = _strip_title_noise(next_line)
+            if looks_like_real_role(candidate):
+                return candidate
     # Some ApplyNOW pages have a TOC line like "Operations Coordinator (Remote) – Company".
-    for raw_line in body.splitlines():
-        line = clean_text(re.sub(r"^[•\-*]\s*", "", raw_line))
+    for line in lines:
         if not line or len(line) > 130:
+            continue
+        for label in labels:
+            inline = re.search(rf"{re.escape(label)}\s*:\s*(.+)$", line, flags=re.I)
+            if inline:
+                candidate = _strip_title_noise(inline.group(1))
+                if looks_like_real_role(candidate):
+                    return candidate
+        if re.match(r"^(?:how to apply|about|contents|the role)$", line, re.I):
             continue
         line = re.sub(r"\s+[–—-]\s+[A-Z][A-Za-z0-9 &.'’/-]{2,80}$", "", line)
         candidate = _strip_title_noise(line)
@@ -237,7 +254,7 @@ def extract_company_from_text(title: str | None, text: str | None) -> str | None
 def clean_text(value: str | None, max_spaces: bool = True) -> str:
     if not value:
         return ""
-    text = html.unescape(value).replace("\xa0", " ")
+    text = html.unescape(str(value)).replace("\xa0", " ")
     text = re.sub(r"[\u200b\ufeff]", "", text)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     if max_spaces:
@@ -309,6 +326,50 @@ def find_deadline(text: str) -> str | None:
     return None
 
 
+def extract_labeled_value(text: str | None, labels: Iterable[str], max_chars: int = 160) -> str | None:
+    body = clean_text(text or "", max_spaces=False)
+    if not body:
+        return None
+    for label in labels:
+        pattern = rf"(?im)^\s*(?:[•\-*]\s*)?{re.escape(label)}\s*:?\s*([^\n]+)"
+        match = re.search(pattern, body)
+        if match:
+            value = clean_text(match.group(1))
+            if value and len(value) <= max_chars:
+                return value
+    return None
+
+
+def extract_section(text: str | None, headings: Iterable[str], max_chars: int = 1600) -> str | None:
+    """Extract a compact section body after one of the supplied line headings."""
+    body = clean_text(text or "", max_spaces=False)
+    if not body:
+        return None
+    heading_alt = "|".join(re.escape(h) for h in headings)
+    next_heading = (
+        r"responsibilities|duties|requirements|qualifications|skills|experience|education|"
+        r"how to apply|application process|deadline|closing date|about|benefits|salary|location|"
+        r"job description|key competencies|selection process"
+    )
+    pattern = rf"(?ims)^\s*(?:{heading_alt})\s*:?\s*(.+?)(?=^\s*(?:{next_heading})\s*:?\s*$|\Z)"
+    match = re.search(pattern, body)
+    if not match:
+        return None
+    section = clean_text(match.group(1), max_spaces=False)
+    lines = []
+    for raw_line in section.splitlines():
+        line = clean_text(raw_line)
+        if not line:
+            continue
+        if PURE_HEADING_RE.match(line):
+            break
+        lines.append(line)
+    value = "\n".join(lines).strip()
+    if not value:
+        return None
+    return value[:max_chars].rsplit(" ", 1)[0].rstrip(".,; ") if len(value) > max_chars else value
+
+
 def is_expired(expires_at: str | None) -> bool:
     if not expires_at:
         return False
@@ -322,6 +383,7 @@ def _split_hiring_title(raw_title: str) -> tuple[str | None, str | None]:
     title = _strip_title_noise(raw_title)
     patterns = [
         r"^(?P<company>.+?)\s+(?:is|are)\s+hiring\s*:?\s*(?:(?:for|to fill)\s+)?(?:a|an|the)?\s*(?P<title>.+)$",
+        r"^(?P<company>.+?)\s+hiring\s*:?\s*(?:(?:for|to fill)\s+)?(?:a|an|the)?\s*(?P<title>.+)$",
         r"^(?P<company>.+?)\s+(?:seeks|is seeking|are seeking|is recruiting|are recruiting)\s*:?\s*(?:a|an|the)?\s*(?P<title>.+)$",
         r"^(?P<title>.+?)\s+(?:at|with)\s+(?P<company>[A-Z0-9][A-Za-z0-9 &.,'’/-]{2,80})$",
     ]
@@ -356,10 +418,14 @@ def clean_job_title(raw_title: str | None, company: str | None = None, text: str
         title = re.sub(rf"^\s*{re.escape(clean_text(good_company))}\s*[-–—:|]\s*", "", title, flags=re.I)
         title = _strip_title_noise(title)
 
-    if not looks_like_real_role(title):
-        extracted = extract_role_from_text(body)
-        if extracted:
-            title = extracted
+    title = re.sub(r"\s+vacanc(?:y|ies)\s*(?:20\d{2})?\b.*$", "", title, flags=re.I)
+
+    extracted = extract_role_from_text(body)
+    if extracted and (
+        not looks_like_real_role(title)
+        or re.search(r"\b(?:hiring|recruiting|paying|earn|salary|compensation|usd|eur|gbp)\b", original, re.I)
+    ):
+        title = extracted
 
     max_len = int(os.getenv("MAX_TITLE_CHARS", "80"))
     if len(title) > max_len:

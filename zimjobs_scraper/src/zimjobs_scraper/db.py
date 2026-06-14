@@ -18,9 +18,13 @@ OPTIONAL_COLUMNS_SQL = {
     "source_url": "TEXT",
     "posted_at": "TEXT",
     "expires_at": "TEXT",
+    "department": "TEXT",
     "employment_type": "TEXT",
     "salary_range": "TEXT",
     "remote_status": "TEXT",
+    "job_description": "TEXT",
+    "requirements": "TEXT",
+    "external_job_id": "TEXT",
     "content_hash": "TEXT",
     "scraped_at": "TEXT",
 }

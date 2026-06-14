@@ -7,7 +7,9 @@ from .normalization import (
     clean_job_title,
     clean_text,
     content_hash,
+    extract_labeled_value,
     extract_salary,
+    extract_section,
     find_deadline,
     infer_company,
     looks_like_good_company,
@@ -26,7 +28,11 @@ def map_raw_job(raw: RawJob, config: SourceConfig) -> JobRecord:
     body = clean_text(raw.summary or raw.description_html or "", max_spaces=False)
 
     parsed_company = clean_text(raw.company)
-    company = parsed_company if looks_like_good_company(parsed_company) else infer_company(original_title, body)
+    if looks_like_good_company(parsed_company):
+        company = parsed_company
+    else:
+        inferred_company = infer_company(original_title, body)
+        company = inferred_company if looks_like_good_company(inferred_company) else clean_text(config.default_company) or "Confidential"
     title = clean_job_title(original_title, company=company, text=body)
     location = normalize_location(raw.location, title=original_title, text=body, default=config.default_location)
     category = normalize_category(raw.category or config.default_category, title=f"{original_title} {title}", location=location, text=body, default=config.default_category)
@@ -34,6 +40,19 @@ def map_raw_job(raw: RawJob, config: SourceConfig) -> JobRecord:
     salary_range = clean_text(raw.salary_range) or extract_salary(body)
     expires_at = raw.expires_at or find_deadline(f"{original_title}\n{body}")
     remote_status = clean_text(raw.remote_status) or normalize_remote_status(location, body)
+    department = clean_text(raw.department) or extract_labeled_value(body, ["Department", "Team", "Unit", "Programme", "Program"])
+    requirements = clean_text(raw.requirements, max_spaces=False) or extract_section(
+        body,
+        [
+            "Requirements",
+            "Qualifications",
+            "Qualifications and Experience",
+            "Required Skills",
+            "Skills and Experience",
+            "Education and Experience",
+            "Candidate Profile",
+        ],
+    )
     apply_url = normalize_url(raw.apply_url, raw.source_url) or normalize_url(raw.source_url) or ""
     summary = make_summary(original_title, body)
 
@@ -45,6 +64,8 @@ def map_raw_job(raw: RawJob, config: SourceConfig) -> JobRecord:
         meta_bits.append(f"Deadline: {expires_at}")
     if employment_type:
         meta_bits.append(f"Type: {employment_type}")
+    if department:
+        meta_bits.append(f"Department: {department}")
     if salary_range:
         meta_bits.append(f"Salary: {salary_range}")
     if remote_status and remote_status != "On-site":
@@ -66,9 +87,13 @@ def map_raw_job(raw: RawJob, config: SourceConfig) -> JobRecord:
         source_url=raw.source_url,
         posted_at=raw.posted_at,
         expires_at=expires_at,
+        department=department,
         employment_type=employment_type,
         salary_range=salary_range,
         remote_status=remote_status,
+        job_description=body,
+        requirements=requirements,
+        external_job_id=raw.external_id,
         content_hash=digest,
         scraped_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
     )
