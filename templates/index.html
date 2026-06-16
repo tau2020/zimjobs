@@ -4,7 +4,7 @@
 
 {% set qs %}q={{ filters.q|urlencode }}&cat={{ filters.cat|urlencode }}&type={{ filters.type|urlencode }}&remote={{ filters.remote|urlencode }}&exp={{ filters.exp|urlencode }}&loc={{ filters.loc|urlencode }}&sort={{ filters.sort|urlencode }}{% endset %}
 
-<details class="filterbar"{{ ' open' if active_filters }}>
+<details class="filterbar" open>
   <summary>
     <span>Job Filter</span>
     {% if active_filters %}<span class="badge green">on</span>{% endif %}

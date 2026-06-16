@@ -172,6 +172,18 @@ def test_job_page_renders_schema_only_for_active_detail_pages(tmp_path, monkeypa
     assert "JobPosting" not in expired_response.get_data(as_text=True)
 
 
+def test_homepage_filterbar_is_open_by_default(tmp_path, monkeypatch):
+    web_app = import_web_app(tmp_path, monkeypatch)
+
+    response = web_app.app.test_client().get("/")
+    soup = BeautifulSoup(response.get_data(as_text=True), "html.parser")
+    filterbar = soup.find("details", class_="filterbar")
+
+    assert response.status_code == 200
+    assert filterbar is not None
+    assert filterbar.has_attr("open")
+
+
 def import_web_app(tmp_path, monkeypatch):
     for module_name in ("admin", "auth", "app"):
         sys.modules.pop(module_name, None)
