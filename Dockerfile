@@ -16,8 +16,7 @@ ENV SCRAPER_CRON_SCHEDULE="15 6 * * *"
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=3s \
-  CMD wget -qO- http://localhost:8000/health || exit 1
+  CMD wget -qO- "http://localhost:${PORT:-8000}/health" || exit 1
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
-CMD ["gunicorn", "-b", "0.0.0.0:8000", "-w", "2", "--threads", "8", \
-     "--access-logfile", "-", "app:app"]
+CMD ["sh", "-c", "exec gunicorn -b 0.0.0.0:${PORT:-8000} -w ${WEB_CONCURRENCY:-2} --threads ${GUNICORN_THREADS:-8} --access-logfile - --error-logfile - --log-level ${LOG_LEVEL:-info} app:app"]

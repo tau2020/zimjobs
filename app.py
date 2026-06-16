@@ -1,10 +1,21 @@
-import os, re, sqlite3
+import asyncio, json, logging, os, re, sqlite3, sys, threading, time
 from datetime import datetime, timezone
 from math import ceil
+from traceback import format_exception
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
 from flask import (Flask, g, request, render_template, abort,
-                   Response, redirect, url_for)
+                   Response, redirect, url_for, has_request_context)
 from flask_compress import Compress
+from werkzeug.exceptions import HTTPException
+
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    stream=sys.stdout,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+log = logging.getLogger("zimjobs.web")
 
 DB_PATH     = os.environ.get("DB_PATH", "/data/jobs.db")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "change-me")
@@ -48,6 +59,154 @@ CLOSED_TAG = "closed"
 app = Flask(__name__)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 604800   # 7-day static cache
 Compress(app)                                       # gzip/brotli all responses
+
+SENSITIVE_KEYS = (
+    "authorization", "cookie", "set-cookie", "token", "secret", "password",
+    "passwd", "api-key", "apikey", "x-api-key", "csrf", "session",
+)
+
+
+def is_sensitive_key(key):
+    key = (key or "").lower()
+    return any(part in key for part in SENSITIVE_KEYS)
+
+
+def truncate(value, limit=500):
+    value = "" if value is None else str(value)
+    return value if len(value) <= limit else value[:limit] + "...[truncated]"
+
+
+def sanitize_url(url):
+    if not url:
+        return ""
+    parts = urlsplit(url)
+    query = urlencode([
+        (key, "[redacted]" if is_sensitive_key(key) else truncate(value, 200))
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+    ])
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, ""))
+
+
+def safe_headers():
+    if not has_request_context():
+        return {}
+    safe = {}
+    for key, value in request.headers.items():
+        if is_sensitive_key(key):
+            safe[key] = "[redacted]"
+        elif key.lower() in {"referer", "referrer"}:
+            safe[key] = sanitize_url(value)
+        else:
+            safe[key] = truncate(value)
+    return safe
+
+
+def request_context_snapshot():
+    if not has_request_context():
+        return {}
+    return {
+        "method": request.method,
+        "url": sanitize_url(request.url),
+        "path": request.path,
+        "remote_addr": request.headers.get("X-Forwarded-For", request.remote_addr),
+        "user_agent": truncate(request.headers.get("User-Agent", "")),
+        "headers": safe_headers(),
+    }
+
+
+def runtime_config_snapshot():
+    return {
+        "db_path": DB_PATH,
+        "site_url": SITE_URL,
+        "port": os.environ.get("PORT"),
+        "log_level": LOG_LEVEL,
+        "secret_key_set": bool(os.environ.get("SECRET_KEY")),
+        "admin_token_set": bool(ADMIN_TOKEN),
+        "admin_token_uses_default": ADMIN_TOKEN == "change-me",
+        "admin_email_set": bool(os.environ.get("ADMIN_EMAIL")),
+        "admin_password_set": bool(os.environ.get("ADMIN_PASSWORD")),
+        "enable_scraper_cron": os.environ.get("ENABLE_SCRAPER_CRON"),
+        "scraper_cron_schedule_set": bool(os.environ.get("SCRAPER_CRON_SCHEDULE")),
+        "python_version": sys.version.split()[0],
+    }
+
+
+def error_snapshot(error, status_code=None):
+    return {
+        "type": error.__class__.__name__,
+        "message": str(error),
+        "repr": repr(error),
+        "status_code": status_code,
+        "stack": "".join(format_exception(type(error), error, error.__traceback__)),
+    }
+
+
+def log_event(level, event, **fields):
+    log.log(level, "%s %s", event, json.dumps(fields, default=str, sort_keys=True))
+
+
+def _global_exception_hook(exc_type, exc, tb):
+    log.critical(
+        "uncaught_exception %s",
+        json.dumps({
+            "error": {
+                "type": exc_type.__name__,
+                "message": str(exc),
+                "repr": repr(exc),
+                "stack": "".join(format_exception(exc_type, exc, tb)),
+            },
+            "config": runtime_config_snapshot(),
+        }, default=str, sort_keys=True),
+        exc_info=(exc_type, exc, tb),
+    )
+
+
+def _thread_exception_hook(args):
+    _global_exception_hook(args.exc_type, args.exc_value, args.exc_traceback)
+
+
+def _asyncio_exception_handler(_loop, context):
+    error = context.get("exception")
+    fields = {"message": context.get("message"), "config": runtime_config_snapshot()}
+    if error:
+        fields["error"] = error_snapshot(error)
+        log.error(
+            "unhandled_asyncio_exception %s",
+            json.dumps(fields, default=str, sort_keys=True),
+            exc_info=(type(error), error, error.__traceback__),
+        )
+    else:
+        log.error("unhandled_asyncio_exception %s", json.dumps(fields, default=str, sort_keys=True))
+
+
+sys.excepthook = _global_exception_hook
+threading.excepthook = _thread_exception_hook
+try:
+    asyncio.get_event_loop().set_exception_handler(_asyncio_exception_handler)
+except RuntimeError:
+    pass
+
+
+@app.before_request
+def start_request_timer():
+    g.request_started_at = time.perf_counter()
+
+
+@app.after_request
+def log_error_response(response):
+    if response.status_code >= 500:
+        elapsed_ms = None
+        if hasattr(g, "request_started_at"):
+            elapsed_ms = round((time.perf_counter() - g.request_started_at) * 1000, 2)
+        log_event(
+            logging.ERROR,
+            "http_error_response",
+            status_code=response.status_code,
+            elapsed_ms=elapsed_ms,
+            request=request_context_snapshot(),
+            config=runtime_config_snapshot(),
+        )
+    return response
 
 
 # ----------------------------- database -----------------------------
@@ -483,7 +642,15 @@ def index():
             "SELECT jobs.* " + base +
             f" ORDER BY {order} LIMIT ? OFFSET ?",
             args + [PER_PAGE, (page - 1) * PER_PAGE]).fetchall()
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as exc:
+        log_event(
+            logging.ERROR,
+            "jobs_query_failed",
+            error=error_snapshot(exc),
+            request=request_context_snapshot(),
+            query={"base": base, "args_count": len(args), "sort": sort},
+            config=runtime_config_snapshot(),
+        )
         total, jobs = 0, []
 
     filters = {"q": q, "cat": cat, "type": jtype, "remote": work,
@@ -608,9 +775,21 @@ def sw():
 def health():
     try:
         jobs_count = get_db().execute("SELECT COUNT(*) AS count FROM jobs").fetchone()["count"]
-    except sqlite3.Error:
+    except sqlite3.Error as exc:
+        log_event(
+            logging.ERROR,
+            "health_db_error",
+            error=error_snapshot(exc),
+            request=request_context_snapshot(),
+            config=runtime_config_snapshot(),
+        )
         jobs_count = None
     return {"status": "ok", "jobs": jobs_count}
+
+
+@app.route("/healthz/live")
+def health_live():
+    return {"status": "ok"}
 
 
 @app.errorhandler(404)
@@ -619,7 +798,41 @@ def not_found(_):
                            cat=None, q=""), 404
 
 
-init_db()
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    if isinstance(error, HTTPException):
+        if error.code and error.code >= 500:
+            log_event(
+                logging.ERROR,
+                "http_exception",
+                error=error_snapshot(error, error.code),
+                request=request_context_snapshot(),
+                config=runtime_config_snapshot(),
+            )
+        return error
+
+    log_event(
+        logging.ERROR,
+        "unhandled_request_exception",
+        error=error_snapshot(error, 500),
+        request=request_context_snapshot(),
+        config=runtime_config_snapshot(),
+    )
+    return "Internal Server Error", 500
+
+
+log_event(logging.INFO, "app_starting", config=runtime_config_snapshot())
+try:
+    init_db()
+    log_event(logging.INFO, "db_initialized", db_path=DB_PATH)
+except Exception as exc:
+    log_event(
+        logging.CRITICAL,
+        "db_init_failed",
+        error=error_snapshot(exc),
+        config=runtime_config_snapshot(),
+    )
+    raise
 
 # ---------------------- user & admin modules ------------------------
 import os as _os
@@ -630,7 +843,17 @@ from admin import admin_bp               # noqa: E402
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(admin_bp)
-init_auth_db()
+try:
+    init_auth_db()
+    log_event(logging.INFO, "auth_db_initialized", db_path=DB_PATH)
+except Exception as exc:
+    log_event(
+        logging.CRITICAL,
+        "auth_db_init_failed",
+        error=error_snapshot(exc),
+        config=runtime_config_snapshot(),
+    )
+    raise
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), debug=True)
