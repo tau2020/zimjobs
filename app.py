@@ -109,7 +109,9 @@ def close_db(_=None):
 
 
 def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
     db = sqlite3.connect(DB_PATH)
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("""CREATE TABLE IF NOT EXISTS jobs(
@@ -137,8 +139,6 @@ def init_db():
         VALUES('delete',old.id,old.title,old.company,old.summary,old.location); END""")
 
     had_jobs = db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] > 0
-    if had_jobs:
-        purge_closed_jobs(db)
 
     if not had_jobs:
         seed = [

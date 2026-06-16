@@ -116,7 +116,15 @@ def test_sqlite_delete_expired_jobs_removes_saved_refs(tmp_path: Path):
     repo.conn.execute(
         """INSERT INTO jobs(title,company,location,category,summary,apply_url,expires_at)
            VALUES(?,?,?,?,?,?,?)""",
-        ("Expired Role", "Org", "Harare", "Private Sector", "Expired summary", "https://example.com/expired", "2020-01-01"),
+        (
+            "Expired Role",
+            "Org",
+            "Harare",
+            "Private Sector",
+            "Expired summary",
+            "https://example.com/expired",
+            "2020-01-01",
+        ),
     )
     expired_id = repo.conn.execute("SELECT id FROM jobs WHERE title='Expired Role'").fetchone()["id"]
     repo.conn.execute("INSERT INTO saved_jobs(user_id, job_id) VALUES(?, ?)", (1, expired_id))
@@ -135,6 +143,34 @@ def test_sqlite_delete_expired_jobs_removes_saved_refs(tmp_path: Path):
     assert deleted == 1
     assert remaining_titles == ["Active Role"]
     assert saved_count == 0
+
+
+def test_sqlite_delete_expired_jobs_rebuilds_stale_fts_before_delete(tmp_path: Path):
+    db_path = tmp_path / "jobs.db"
+    repo = SQLiteJobRepository(str(db_path), auto_add_optional_columns=True)
+    repo.conn.execute(
+        """INSERT INTO jobs(title,company,location,category,summary,apply_url,expires_at)
+           VALUES(?,?,?,?,?,?,?)""",
+        ("Expired Role", "Org", "Harare", "Private Sector", "Expired summary", "https://example.com/expired", "2020-01-01"),
+    )
+    repo.conn.execute(
+        """CREATE VIRTUAL TABLE jobs_fts USING fts5(
+           title, company, summary, location,
+           content='jobs', content_rowid='id')"""
+    )
+    repo.conn.execute(
+        """CREATE TRIGGER jobs_ad AFTER DELETE ON jobs BEGIN
+           INSERT INTO jobs_fts(jobs_fts,rowid,title,company,summary,location)
+           VALUES('delete',old.id,old.title,old.company,old.summary,old.location); END"""
+    )
+    repo.conn.commit()
+
+    deleted = repo.delete_expired_jobs()
+    remaining = repo.count_jobs()
+    repo.close()
+
+    assert deleted == 1
+    assert remaining == 0
 
 
 

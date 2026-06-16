@@ -154,6 +154,8 @@ class SQLiteJobRepository:
         if dry_run or count == 0:
             return count
 
+        self.rebuild_fts_if_present()
+
         saved_exists = self.conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='saved_jobs'"
         ).fetchone()

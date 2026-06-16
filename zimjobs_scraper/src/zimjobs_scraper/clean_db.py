@@ -9,7 +9,11 @@ from .logging_config import configure_logging
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Remove expired jobs from the zimjobs SQLite database.")
-    parser.add_argument("--db", default=os.getenv("JOBS_DB_PATH", "/data/jobs.db"), help="Path to SQLite jobs.db")
+    parser.add_argument(
+        "--db",
+        default=os.getenv("JOBS_DB_PATH") or os.getenv("DB_PATH", "/data/jobs.db"),
+        help="Path to SQLite jobs.db",
+    )
     parser.add_argument("--table", default=os.getenv("JOBS_TABLE", "jobs"), help="Jobs table name")
     parser.add_argument("--dry-run", action="store_true", default=os.getenv("DRY_RUN", "0") == "1", help="Count expired jobs without deleting")
     parser.add_argument("--log-level", default=os.getenv("LOG_LEVEL", "INFO"))
