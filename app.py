@@ -43,6 +43,7 @@ SORT_OPTIONS = {
 }
 
 SIMILAR_LIMIT = 4
+CLOSED_TAG = "closed"
 
 app = Flask(__name__)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 604800   # 7-day static cache
@@ -55,6 +56,49 @@ def get_db():
         g.db = sqlite3.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
     return g.db
+
+
+def db_columns(conn, table="jobs"):
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def closed_jobs_where_sql(cols, table="jobs"):
+    prefix = f"{table}." if table else ""
+    conditions = []
+    if "tags" in cols:
+        tags_expr = (
+            f"(',' || replace(replace(lower(coalesce({prefix}tags,'')), "
+            "';', ','), '|', ',') || ',') LIKE '%,closed,%'"
+        )
+        conditions.append(tags_expr)
+    if "expires_at" in cols:
+        conditions.append(
+            f"({prefix}expires_at IS NOT NULL AND TRIM({prefix}expires_at) <> '' "
+            f"AND date(substr({prefix}expires_at,1,10)) < date('now'))"
+        )
+    return "(" + " OR ".join(conditions) + ")" if conditions else "(0)"
+
+
+def active_jobs_where_sql(cols, table="jobs"):
+    return f"NOT {closed_jobs_where_sql(cols, table)}"
+
+
+def purge_closed_jobs(conn):
+    cols = db_columns(conn)
+    where = closed_jobs_where_sql(cols)
+    if where == "(0)":
+        return 0
+
+    saved_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='saved_jobs'"
+    ).fetchone()
+    if saved_exists:
+        conn.execute(
+            f"DELETE FROM saved_jobs WHERE job_id IN "
+            f"(SELECT id FROM jobs WHERE {where})"
+        )
+    cur = conn.execute(f"DELETE FROM jobs WHERE {where}")
+    return cur.rowcount if cur.rowcount != -1 else 0
 
 
 @app.teardown_appcontext
@@ -92,7 +136,11 @@ def init_db():
         INSERT INTO jobs_fts(jobs_fts,rowid,title,company,summary,location)
         VALUES('delete',old.id,old.title,old.company,old.summary,old.location); END""")
 
-    if db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0:
+    had_jobs = db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] > 0
+    if had_jobs:
+        purge_closed_jobs(db)
+
+    if not had_jobs:
         seed = [
             ("Programme Officer", "Local Development NGO", "Harare",
              "NGO & Development",
@@ -170,7 +218,7 @@ def fts_match(q):
 
 def job_columns(db=None):
     db = db or get_db()
-    return {r[1] for r in db.execute("PRAGMA table_info(jobs)").fetchall()}
+    return db_columns(db)
 
 
 def optional_job_values(form, cols):
@@ -263,6 +311,22 @@ def is_expired_job(row):
     return bool(d and d < datetime.now(timezone.utc).date())
 
 
+def is_closed_tagged_job(row):
+    return CLOSED_TAG in {t.lower() for t in tags(row_value(row, "tags"))}
+
+
+def is_closed_job(row):
+    return is_closed_tagged_job(row) or is_expired_job(row)
+
+
+def form_values_are_closed(form):
+    d = parsed_date(form.get("expires_at", ""))
+    return (
+        CLOSED_TAG in {t.lower() for t in tags(form.get("tags", ""))}
+        or bool(d and d < datetime.now(timezone.utc).date())
+    )
+
+
 def parsed_created_at(row):
     try:
         return datetime.strptime(row["created_at"], "%Y-%m-%d %H:%M:%S")
@@ -291,7 +355,7 @@ def similar_jobs(db, job, limit=SIMILAR_LIMIT):
         (job["id"],)).fetchall()
     ranked, fallback = [], []
     for candidate in candidates:
-        if is_expired_job(candidate):
+        if is_closed_job(candidate):
             continue
 
         fallback.append(candidate)
@@ -388,6 +452,7 @@ def index():
         args = [fts_match(q)]
     else:
         base, args = "FROM jobs WHERE 1=1", []
+    base += f" AND {active_jobs_where_sql(cols, 'jobs')}"
     if cat:
         base += " AND category = ?"
         args.append(cat)
@@ -440,7 +505,7 @@ def index():
 def job(job_id, s=None):
     db  = get_db()
     row = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
-    if not row:
+    if not row or is_closed_job(row):
         abort(404)
     url = f"{SITE_URL}/job/{row['id']}/{slug(row['title'])}"
     similar = similar_jobs(db, row)
@@ -466,6 +531,8 @@ def post():
                      ("title", "company", "location", "category",
                       "summary", "apply_url")):
             error = "All fields are required."
+        elif form_values_are_closed(f):
+            error = "Closed or expired jobs are not published."
         else:
             db   = get_db()
             core = ("title", "company", "location", "category",
@@ -489,8 +556,11 @@ def post():
 # ------------------------------- SEO --------------------------------
 @app.route("/sitemap.xml")
 def sitemap():
-    rows = get_db().execute(
-        "SELECT id,title,created_at FROM jobs ORDER BY id").fetchall()
+    db = get_db()
+    where = active_jobs_where_sql(job_columns(db), "jobs")
+    rows = db.execute(
+        f"SELECT id,title,created_at FROM jobs WHERE {where} ORDER BY id"
+    ).fetchall()
     urls = [f"<url><loc>{SITE_URL}/</loc></url>"] + [
         f"<url><loc>{SITE_URL}/job/{r['id']}/{slug(r['title'])}</loc>"
         f"<lastmod>{r['created_at'][:10]}</lastmod></url>" for r in rows]
@@ -502,8 +572,11 @@ def sitemap():
 
 @app.route("/feed.xml")
 def feed():
-    rows = get_db().execute(
-        "SELECT * FROM jobs ORDER BY created_at DESC LIMIT 30").fetchall()
+    db = get_db()
+    where = active_jobs_where_sql(job_columns(db), "jobs")
+    rows = db.execute(
+        f"SELECT * FROM jobs WHERE {where} ORDER BY created_at DESC LIMIT 30"
+    ).fetchall()
     items = "".join(
         f"<item><title>{escape(r['title'])} — {escape(r['company'])}</title>"
         f"<link>{SITE_URL}/job/{r['id']}/{slug(r['title'])}</link>"

@@ -109,6 +109,34 @@ def test_sqlite_auto_adds_enriched_optional_columns(tmp_path: Path):
     assert row[2] == "A/GEN/13/21"
 
 
+def test_sqlite_delete_expired_jobs_removes_saved_refs(tmp_path: Path):
+    db_path = tmp_path / "jobs.db"
+    repo = SQLiteJobRepository(str(db_path), auto_add_optional_columns=True)
+    repo.conn.execute("CREATE TABLE saved_jobs(user_id INTEGER, job_id INTEGER)")
+    repo.conn.execute(
+        """INSERT INTO jobs(title,company,location,category,summary,apply_url,expires_at)
+           VALUES(?,?,?,?,?,?,?)""",
+        ("Expired Role", "Org", "Harare", "Private Sector", "Expired summary", "https://example.com/expired", "2020-01-01"),
+    )
+    expired_id = repo.conn.execute("SELECT id FROM jobs WHERE title='Expired Role'").fetchone()["id"]
+    repo.conn.execute("INSERT INTO saved_jobs(user_id, job_id) VALUES(?, ?)", (1, expired_id))
+    repo.conn.execute(
+        """INSERT INTO jobs(title,company,location,category,summary,apply_url,expires_at)
+           VALUES(?,?,?,?,?,?,?)""",
+        ("Active Role", "Org", "Harare", "Private Sector", "Active summary", "https://example.com/active", "2099-01-01"),
+    )
+    repo.conn.commit()
+
+    deleted = repo.delete_expired_jobs()
+    remaining_titles = [r["title"] for r in repo.conn.execute("SELECT title FROM jobs ORDER BY title").fetchall()]
+    saved_count = repo.conn.execute("SELECT COUNT(*) c FROM saved_jobs").fetchone()["c"]
+    repo.close()
+
+    assert deleted == 1
+    assert remaining_titles == ["Active Role"]
+    assert saved_count == 0
+
+
 
 def test_applynow_title_summary_and_remote_category_are_cleaned():
     cfg = SourceConfig(name="applynow_zimbabwe", type="applynow", start_urls=[], default_location="Zimbabwe", default_category="Private Sector")

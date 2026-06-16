@@ -141,6 +141,32 @@ class SQLiteJobRepository:
         row = self.conn.execute(f"SELECT COUNT(*) AS count FROM {self.table_name}").fetchone()
         return int(row["count"])
 
+    def delete_expired_jobs(self, dry_run: bool = False) -> int:
+        available = self.columns()
+        if "expires_at" not in available:
+            return 0
+        where = (
+            "expires_at IS NOT NULL AND TRIM(expires_at) <> '' "
+            "AND date(substr(expires_at, 1, 10)) < date('now')"
+        )
+        row = self.conn.execute(f"SELECT COUNT(*) AS count FROM {self.table_name} WHERE {where}").fetchone()
+        count = int(row["count"])
+        if dry_run or count == 0:
+            return count
+
+        saved_exists = self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='saved_jobs'"
+        ).fetchone()
+        if saved_exists:
+            self.conn.execute(
+                f"DELETE FROM saved_jobs WHERE job_id IN "
+                f"(SELECT id FROM {self.table_name} WHERE {where})"
+            )
+        self.conn.execute(f"DELETE FROM {self.table_name} WHERE {where}")
+        self.conn.commit()
+        log.info("db_expired_deleted", extra={"status": count})
+        return count
+
     def rebuild_fts_if_present(self) -> bool:
         row = self.conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?",

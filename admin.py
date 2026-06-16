@@ -4,7 +4,7 @@ from flask import (Blueprint, g, request, render_template, redirect,
 
 from app import (get_db, CATEGORIES, PER_PAGE, EMPLOYMENT_TYPES,
                  REMOTE_OPTIONS, EXPERIENCE_LEVELS, job_columns,
-                 optional_job_values)
+                 optional_job_values, form_values_are_closed)
 from auth import admin_required, check_csrf
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -71,6 +71,9 @@ def job_form(job_id=None):
                   "summary", "apply_url")
         if not all(f.get(k, "").strip() for k in fields):
             error = "All fields are required."
+            job = dict(f)
+        elif form_values_are_closed(f):
+            error = "Closed or expired jobs are not saved."
             job = dict(f)
         else:
             opt = optional_job_values(f, job_columns(db))
