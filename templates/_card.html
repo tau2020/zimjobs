@@ -1,0 +1,43 @@
+{% macro job_card(j) %}
+<article class="card job-card{{ ' featured' if j['featured'] }}">
+  <div class="badges">
+    {% if j['featured'] %}<span class="badge gold">★ Featured</span>{% endif %}
+    {% if j['created_at']|is_new %}<span class="badge green">New</span>{% endif %}
+    {% if j['remote_status'] and j['remote_status'] != 'On-site' %}
+      <span class="badge blue">{{ j['remote_status'] }}</span>{% endif %}
+    {% if j['employment_type'] %}<span class="badge">{{ j['employment_type'] }}</span>{% endif %}
+    {% if j['experience_level'] %}<span class="badge">{{ j['experience_level'] }}</span>{% endif %}
+  </div>
+  <h2 class="job-title">
+    <a class="stretch" href="/job/{{ j['id'] }}/{{ j['title']|slug }}">{{ j['title'] }}</a>
+  </h2>
+  <p class="firm">{{ j['company'] }} <i>·</i> {{ j['location'] }}</p>
+  {% set dl = j['expires_at']|deadline %}
+  {% if j['salary_range'] or dl %}
+  <p class="facts">
+    {% if j['salary_range'] %}<span class="fact pay">💰 {{ j['salary_range'] }}</span>{% endif %}
+    {% if dl %}<span class="fact due{{ ' urgent' if 'Closes' in dl }}">⏳ {{ dl }}</span>{% endif %}
+  </p>
+  {% endif %}
+  <p class="sum">{{ j['summary'][:150] }}{% if j['summary']|length > 150 %}…{% endif %}</p>
+  {% set tg = j['tags']|tags %}
+  {% if tg %}<p class="chips">{% for t in tg %}<span class="chip">{{ t }}</span>{% endfor %}</p>{% endif %}
+  <div class="card-foot">
+    <p class="tag"><b>{{ j['category'] }}</b><span>{{ j['created_at']|ago }}</span></p>
+    <div class="card-actions">
+      {% if current_user %}
+      <form method="post" class="inline-form"
+            action="/job/{{ j['id'] }}/{{ 'unsave' if is_saved(j['id']) else 'save' }}">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button class="iconbtn{{ ' on' if is_saved(j['id']) }}" type="submit"
+                aria-label="{{ 'Remove bookmark' if is_saved(j['id']) else 'Save job' }}"
+                title="{{ 'Remove bookmark' if is_saved(j['id']) else 'Save job' }}">
+          {{ '★' if is_saved(j['id']) else '☆' }}</button>
+      </form>
+      {% endif %}
+      <a class="btn sm ghost" href="/job/{{ j['id'] }}/{{ j['title']|slug }}">View</a>
+      <a class="btn sm" href="{{ j['apply_url'] }}" rel="nofollow noopener" target="_blank">Apply</a>
+    </div>
+  </div>
+</article>
+{% endmacro %}

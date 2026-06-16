@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_card.html" import job_card %}
 {% block title %}My Account | ZimJobs Hub{% endblock %}
 {% block content %}
 <article class="card detail">
@@ -20,14 +21,7 @@
 </article>
 
 <h2 class="meta" style="font-size:1rem">Saved jobs ({{ saved|length }})</h2>
-{% for j in saved %}
-<a class="card {{ 'featured' if j['featured'] }}"
-   href="/job/{{ j['id'] }}/{{ j['title']|slug }}">
-  <h2>{{ j['title'] }}</h2>
-  <p class="firm">{{ j['company'] }} <i>·</i> {{ j['location'] }}</p>
-  <p class="tag"><b>{{ j['category'] }}</b><span>Saved {{ j['saved_at']|ago }}</span></p>
-</a>
-{% else %}
+{% for j in saved %}{{ job_card(j) }}{% else %}
 <div class="card empty"><p>No saved jobs yet.
    <a href="/">Browse jobs</a> and tap “☆ Save job”.</p></div>
 {% endfor %}

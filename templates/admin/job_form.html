@@ -18,6 +18,26 @@
     </label>
     <label>Summary <textarea name="summary" rows="5" required>{{ job['summary'] if job }}</textarea></label>
     <label>Apply URL <input name="apply_url" type="url" required value="{{ job['apply_url'] if job }}"></label>
+    <div class="form-grid">
+      <label>Job type
+        <select name="employment_type"><option value="">— optional —</option>
+          {% for o in employment_types %}<option {{ 'selected' if job and job['employment_type'] == o }}>{{ o }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Workplace
+        <select name="remote_status"><option value="">— optional —</option>
+          {% for o in remote_options %}<option {{ 'selected' if job and job['remote_status'] == o }}>{{ o }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Experience level
+        <select name="experience_level"><option value="">— optional —</option>
+          {% for o in experience_levels %}<option {{ 'selected' if job and job['experience_level'] == o }}>{{ o }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Salary range <input name="salary_range" value="{{ job['salary_range'] if job }}" placeholder="e.g. $500–$800/month"></label>
+      <label>Application deadline <input name="expires_at" type="date" value="{{ job['expires_at'] if job }}"></label>
+      <label>Skills / tags <input name="tags" value="{{ job['tags'] if job }}" placeholder="comma-separated"></label>
+    </div>
     <label class="chk"><input type="checkbox" name="featured"
            {{ 'checked' if job and job['featured'] }}> Featured listing</label>
     <button class="btn" type="submit">Save job</button>

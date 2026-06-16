@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_card.html" import job_card %}
 {% block title %}{{ job['title'] }} — {{ job['company'] }} | ZimJobs Hub{% endblock %}
 {% block desc %}{{ job['title'] }} at {{ job['company'] }}, {{ job['location'] }}. Apply now via ZimJobs Hub.{% endblock %}
 {% block head %}
@@ -7,20 +8,59 @@
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"JobPosting",
  "title":{{ job['title']|tojson }},
- "description":{{ job['summary']|tojson }},
- "datePosted":"{{ job['created_at'][:10] }}",
+ "description":{{ (job['job_description'] or job['summary'])|tojson }},
+ "datePosted":"{{ (job['posted_at'] or job['created_at'])[:10] }}",
+ {% if job['expires_at'] %}"validThrough":{{ job['expires_at']|tojson }},{% endif %}
+ {% if job['employment_type'] %}"employmentType":{{ job['employment_type']|tojson }},{% endif %}
+ {% if job['salary_range'] %}"baseSalary":{"@type":"MonetaryAmount","value":{{ job['salary_range']|tojson }}},{% endif %}
  "hiringOrganization":{"@type":"Organization","name":{{ job['company']|tojson }}},
  "jobLocation":{"@type":"Place","address":{{ job['location']|tojson }}},
  "url":{{ url|tojson }}}
 </script>
 {% endblock %}
 {% block content %}
+<nav class="crumbs" aria-label="Breadcrumb">
+  <a href="/">Jobs</a> <i>›</i>
+  <a href="/?cat={{ job['category']|urlencode }}">{{ job['category'] }}</a> <i>›</i>
+  <span>{{ job['title'] }}</span>
+</nav>
+
 <article class="card detail">
+  <div class="badges">
+    {% if job['featured'] %}<span class="badge gold">★ Featured</span>{% endif %}
+    {% if job['created_at']|is_new %}<span class="badge green">New</span>{% endif %}
+    {% if job['remote_status'] and job['remote_status'] != 'On-site' %}
+      <span class="badge blue">{{ job['remote_status'] }}</span>{% endif %}
+    {% if job['employment_type'] %}<span class="badge">{{ job['employment_type'] }}</span>{% endif %}
+    {% if job['experience_level'] %}<span class="badge">{{ job['experience_level'] }}</span>{% endif %}
+  </div>
   <h1>{{ job['title'] }}</h1>
   <p class="firm">{{ job['company'] }} <i>·</i> {{ job['location'] }}</p>
-  <p class="tag"><b>{{ job['category'] }}</b><span>Posted {{ job['created_at']|ago }}</span></p>
-  <p class="body">{{ job['summary'] }}</p>
-  <a class="btn" href="{{ job['apply_url'] }}" rel="nofollow noopener">Apply on official site →</a>
+
+  <dl class="factgrid">
+    {% if job['salary_range'] %}<div><dt>Salary</dt><dd>{{ job['salary_range'] }}</dd></div>{% endif %}
+    {% if job['employment_type'] %}<div><dt>Job type</dt><dd>{{ job['employment_type'] }}</dd></div>{% endif %}
+    {% if job['remote_status'] %}<div><dt>Workplace</dt><dd>{{ job['remote_status'] }}</dd></div>{% endif %}
+    {% if job['experience_level'] %}<div><dt>Experience</dt><dd>{{ job['experience_level'] }}</dd></div>{% endif %}
+    {% if job['department'] %}<div><dt>Department</dt><dd>{{ job['department'] }}</dd></div>{% endif %}
+    {% set dl = job['expires_at']|deadline %}
+    {% if dl %}<div><dt>Deadline</dt><dd class="{{ 'urgent' if 'Closes' in dl }}">{{ dl }}</dd></div>{% endif %}
+    <div><dt>Posted</dt><dd>{{ (job['posted_at'] or job['created_at'])|ago }}</dd></div>
+    <div><dt>Category</dt><dd>{{ job['category'] }}</dd></div>
+  </dl>
+
+  {% set tg = job['tags']|tags %}
+  {% if tg %}<p class="chips">{% for t in tg %}<span class="chip">{{ t }}</span>{% endfor %}</p>{% endif %}
+
+  <h2 class="sec">Job description</h2>
+  <p class="body">{{ job['job_description'] or job['summary'] }}</p>
+
+  {% if job['requirements'] %}
+  <h2 class="sec">Requirements</h2>
+  <p class="body">{{ job['requirements'] }}</p>
+  {% endif %}
+
+  <a class="btn" href="{{ job['apply_url'] }}" rel="nofollow noopener" target="_blank">Apply on official site →</a>
   <div class="share">
     <a class="btn wa-share"
        href="https://wa.me/?text={{ (job['title'] ~ ' at ' ~ job['company'] ~ ' — ' ~ url)|urlencode }}">
@@ -37,9 +77,17 @@
   </div>
   <p class="meta">⚠ Always apply on the official source. Never pay anyone to apply for a job.</p>
 </article>
+
 <aside class="card promo">
   <h2>Need a CV that gets interviews?</h2>
   <p>Professional, ATS-friendly CV rewrite from <strong>$10</strong> — delivered in 24 hours.</p>
   <a class="btn gold" href="/services">Get your CV done →</a>
 </aside>
+
+{% if similar %}
+<section class="similar">
+  <h2 class="sec">Similar jobs</h2>
+  {% for j in similar %}{{ job_card(j) }}{% endfor %}
+</section>
+{% endif %}
 {% endblock %}

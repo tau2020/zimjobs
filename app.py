@@ -14,6 +14,36 @@ PER_PAGE    = 20
 CATEGORIES = ["NGO & Development", "Government", "Private Sector",
               "Remote & International", "Internships", "Gigs"]
 
+# Optional, nullable columns added on top of the original schema. Names mirror
+# the scraper's OPTIONAL_COLUMNS_SQL so scraped metadata lands in real columns
+# instead of being appended to the summary text. All are additive and safe.
+OPTIONAL_JOB_COLUMNS = {
+    "employment_type": "TEXT",
+    "salary_range":    "TEXT",
+    "remote_status":   "TEXT",
+    "experience_level":"TEXT",
+    "expires_at":      "TEXT",
+    "posted_at":       "TEXT",
+    "department":      "TEXT",
+    "job_description": "TEXT",
+    "requirements":    "TEXT",
+    "tags":            "TEXT",
+}
+
+# Vocabulary aligned with the scraper's normalization so manual entries and
+# scraped values collapse into the same filter buckets.
+EMPLOYMENT_TYPES = ["Full-time", "Part-time", "Contract", "Internship", "Gig"]
+REMOTE_OPTIONS   = ["On-site", "Hybrid", "Remote"]
+EXPERIENCE_LEVELS = ["Entry level", "Mid level", "Senior", "Management"]
+
+SORT_OPTIONS = {
+    "featured": "Featured first",
+    "newest":   "Newest",
+    "deadline": "Deadline soon",
+}
+
+SIMILAR_LIMIT = 4
+
 app = Flask(__name__)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 604800   # 7-day static cache
 Compress(app)                                       # gzip/brotli all responses
@@ -46,6 +76,12 @@ def init_db():
         featured INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now')))""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_cat ON jobs(category, created_at)")
+
+    # Additive migration: add optional columns if missing (safe on existing rows).
+    existing_cols = {r[1] for r in db.execute("PRAGMA table_info(jobs)").fetchall()}
+    for col, sql_type in OPTIONAL_JOB_COLUMNS.items():
+        if col not in existing_cols:
+            db.execute(f"ALTER TABLE jobs ADD COLUMN {col} {sql_type}")
     db.execute("""CREATE VIRTUAL TABLE IF NOT EXISTS jobs_fts USING fts5(
         title, company, summary, location,
         content='jobs', content_rowid='id')""")
@@ -132,13 +168,219 @@ def fts_match(q):
     return " ".join(f'"{t}"*' for t in tokens)
 
 
+def job_columns(db=None):
+    db = db or get_db()
+    return {r[1] for r in db.execute("PRAGMA table_info(jobs)").fetchall()}
+
+
+def optional_job_values(form, cols):
+    """Map optional job columns present in both the form and the schema."""
+    out = {}
+    for col in OPTIONAL_JOB_COLUMNS:
+        if col in cols and col in form:
+            out[col] = form.get(col, "").strip() or None
+    return out
+
+
+def distinct_values(db, column):
+    if column not in job_columns(db):
+        return []
+    rows = db.execute(
+        f"SELECT DISTINCT {column} v FROM jobs "
+        f"WHERE {column} IS NOT NULL AND TRIM({column}) <> '' ORDER BY v").fetchall()
+    return [r["v"] for r in rows]
+
+
+@app.template_filter("is_new")
+def is_new(ts, days=3):
+    try:
+        dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return False
+    return (datetime.now(timezone.utc) - dt).total_seconds() < days * 86400
+
+
+@app.template_filter("tags")
+def tags(text):
+    if not text:
+        return []
+    return [t.strip() for t in re.split(r"[,;|]", text) if t.strip()][:8]
+
+
+STOP_WORDS = {
+    "and", "are", "but", "can", "for", "from", "has", "have", "hire",
+    "job", "jobs", "must", "not", "our", "the", "this", "via", "with",
+    "work", "will", "you", "your", "years", "required", "requireds",
+    "experience", "skills", "strong", "apply", "official", "site",
+}
+
+
+def row_value(row, key, default=""):
+    """Read optional sqlite.Row columns without assuming every DB is migrated."""
+    return row[key] if key in row.keys() and row[key] is not None else default
+
+
+def normalize_token(token):
+    token = token.lower()
+    if len(token) > 4 and token.endswith("s"):
+        token = token[:-1]
+    return token
+
+
+def keyword_set(*texts):
+    words = set()
+    for text in texts:
+        for word in re.findall(r"[a-z0-9]+", (text or "").lower()):
+            word = normalize_token(word)
+            if len(word) >= 3 and word not in STOP_WORDS:
+                words.add(word)
+    return words
+
+
+def tag_set(text):
+    out = set()
+    for tag in tags(text):
+        norm = " ".join(sorted(keyword_set(tag)))
+        if norm:
+            out.add(norm)
+    return out
+
+
+def parsed_date(text):
+    if not text:
+        return None
+    m = re.search(r"\d{4}-\d{2}-\d{2}", str(text))
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def is_expired_job(row):
+    d = parsed_date(row_value(row, "expires_at"))
+    return bool(d and d < datetime.now(timezone.utc).date())
+
+
+def parsed_created_at(row):
+    try:
+        return datetime.strptime(row["created_at"], "%Y-%m-%d %H:%M:%S")
+    except (KeyError, TypeError, ValueError):
+        return datetime.min
+
+
+def text_for_similarity(row):
+    return " ".join([
+        row_value(row, "summary"),
+        row_value(row, "job_description"),
+        row_value(row, "requirements"),
+        row_value(row, "department"),
+    ])
+
+
+def similar_jobs(db, job, limit=SIMILAR_LIMIT):
+    """Rank active jobs by how closely they match the currently viewed job."""
+    base_title = keyword_set(job["title"])
+    base_tags = tag_set(row_value(job, "tags"))
+    base_content = keyword_set(text_for_similarity(job))
+    base_location = keyword_set(row_value(job, "location"))
+
+    candidates = db.execute(
+        "SELECT * FROM jobs WHERE id<>? ORDER BY featured DESC, created_at DESC",
+        (job["id"],)).fetchall()
+    ranked, fallback = [], []
+    for candidate in candidates:
+        if is_expired_job(candidate):
+            continue
+
+        fallback.append(candidate)
+        score = 0
+        job_category_words = keyword_set(job["category"])
+        candidate_category_words = keyword_set(candidate["category"])
+        if candidate["category"] == job["category"]:
+            score += 24
+        elif "remote" in job_category_words and "remote" in candidate_category_words:
+            score += 8
+
+        for field, weight in (
+            ("employment_type", 8),
+            ("remote_status", 8),
+            ("experience_level", 6),
+        ):
+            if row_value(job, field) and row_value(job, field) == row_value(candidate, field):
+                score += weight
+
+        score += len(base_title & keyword_set(candidate["title"])) * 8
+        score += len(base_tags & tag_set(row_value(candidate, "tags"))) * 10
+        score += min(len(base_content & keyword_set(text_for_similarity(candidate))), 10) * 2
+        score += min(len(base_location & keyword_set(row_value(candidate, "location"))), 2) * 3
+
+        if score:
+            ranked.append((score, candidate))
+
+    ranked.sort(key=lambda item: (
+        item[0],
+        int(row_value(item[1], "featured", 0) or 0),
+        parsed_created_at(item[1]),
+        item[1]["id"],
+    ), reverse=True)
+
+    selected, seen = [], set()
+    for _, candidate in ranked:
+        selected.append(candidate)
+        seen.add(candidate["id"])
+        if len(selected) == limit:
+            return selected
+
+    for candidate in fallback:
+        if candidate["id"] not in seen:
+            selected.append(candidate)
+            seen.add(candidate["id"])
+        if len(selected) == limit:
+            break
+    return selected
+
+
+@app.template_filter("deadline")
+def deadline(ts):
+    """Human-friendly deadline label from a YYYY-MM-DD(ish) string."""
+    if not ts:
+        return ""
+    m = re.search(r"\d{4}-\d{2}-\d{2}", ts)
+    if not m:
+        return ts.strip()[:40]
+    try:
+        d = datetime.strptime(m.group(), "%Y-%m-%d").date()
+    except ValueError:
+        return ts.strip()[:40]
+    days = (d - datetime.now(timezone.utc).date()).days
+    if days < 0:
+        return "Closed"
+    if days == 0:
+        return "Closes today"
+    if days == 1:
+        return "Closes tomorrow"
+    if days <= 7:
+        return f"Closes in {days} days"
+    return d.strftime("%d %b %Y")
+
+
 # ------------------------------ routes ------------------------------
 @app.route("/")
 def index():
-    q    = request.args.get("q", "").strip()
-    cat  = request.args.get("cat", "").strip()
-    page = max(int(request.args.get("page", 1) or 1), 1)
-    db   = get_db()
+    q     = request.args.get("q", "").strip()
+    cat   = request.args.get("cat", "").strip()
+    jtype = request.args.get("type", "").strip()
+    work  = request.args.get("remote", "").strip()
+    exp   = request.args.get("exp", "").strip()
+    loc   = request.args.get("loc", "").strip()
+    sort  = request.args.get("sort", "").strip()
+    if sort not in SORT_OPTIONS:
+        sort = "featured"
+    page  = max(int(request.args.get("page", 1) or 1), 1)
+    db    = get_db()
+    cols  = job_columns(db)
 
     if q and fts_match(q):
         base = ("FROM jobs JOIN jobs_fts ON jobs.id = jobs_fts.rowid "
@@ -149,30 +391,60 @@ def index():
     if cat:
         base += " AND category = ?"
         args.append(cat)
+    if jtype and "employment_type" in cols:
+        base += " AND employment_type = ?"
+        args.append(jtype)
+    if work and "remote_status" in cols:
+        base += " AND remote_status = ?"
+        args.append(work)
+    if exp and "experience_level" in cols:
+        base += " AND experience_level = ?"
+        args.append(exp)
+    if loc:
+        base += " AND location LIKE ?"
+        args.append(f"%{loc}%")
+
+    if sort == "newest":
+        order = "created_at DESC"
+    elif sort == "deadline" and "expires_at" in cols:
+        order = ("(expires_at IS NULL OR TRIM(expires_at)='') ASC, "
+                 "expires_at ASC, created_at DESC")
+    else:
+        order = "featured DESC, created_at DESC"
 
     try:
         total = db.execute("SELECT COUNT(*) c " + base, args).fetchone()["c"]
         jobs  = db.execute(
             "SELECT jobs.* " + base +
-            " ORDER BY featured DESC, created_at DESC LIMIT ? OFFSET ?",
+            f" ORDER BY {order} LIMIT ? OFFSET ?",
             args + [PER_PAGE, (page - 1) * PER_PAGE]).fetchall()
     except sqlite3.OperationalError:
         total, jobs = 0, []
 
-    return render_template("index.html", jobs=jobs, q=q, cat=cat,
-                           categories=CATEGORIES, page=page, total=total,
-                           pages=max(ceil(total / PER_PAGE), 1))
+    filters = {"q": q, "cat": cat, "type": jtype, "remote": work,
+               "exp": exp, "loc": loc, "sort": sort}
+    active = any(v for k, v in filters.items()
+                 if k not in ("sort",) and v) or sort != "featured"
+    return render_template(
+        "index.html", jobs=jobs, q=q, cat=cat, categories=CATEGORIES,
+        page=page, total=total, pages=max(ceil(total / PER_PAGE), 1),
+        filters=filters, active_filters=active, sort=sort,
+        sort_options=SORT_OPTIONS,
+        type_options=distinct_values(db, "employment_type") or [],
+        remote_options=distinct_values(db, "remote_status") or [],
+        exp_options=distinct_values(db, "experience_level") or [])
 
 
 @app.route("/job/<int:job_id>")
 @app.route("/job/<int:job_id>/<s>")
 def job(job_id, s=None):
-    row = get_db().execute("SELECT * FROM jobs WHERE id=?",
-                           (job_id,)).fetchone()
+    db  = get_db()
+    row = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
     if not row:
         abort(404)
     url = f"{SITE_URL}/job/{row['id']}/{slug(row['title'])}"
-    return render_template("job.html", job=row, url=url,
+    similar = similar_jobs(db, row)
+    return render_template("job.html", job=row, url=url, similar=similar,
                            categories=CATEGORIES, cat=None, q="")
 
 
@@ -195,16 +467,23 @@ def post():
                       "summary", "apply_url")):
             error = "All fields are required."
         else:
-            db = get_db()
-            db.execute("""INSERT INTO jobs(title,company,location,category,
-                summary,apply_url,featured) VALUES(?,?,?,?,?,?,?)""",
-                (f["title"].strip(), f["company"].strip(),
-                 f["location"].strip(), f["category"], f["summary"].strip(),
-                 f["apply_url"].strip(), 1 if f.get("featured") else 0))
+            db   = get_db()
+            core = ("title", "company", "location", "category",
+                    "summary", "apply_url")
+            opt  = optional_job_values(f, job_columns(db))
+            cols = list(core) + ["featured"] + list(opt.keys())
+            vals = [f[k].strip() for k in core] + \
+                   [1 if f.get("featured") else 0] + list(opt.values())
+            db.execute(
+                f"INSERT INTO jobs({','.join(cols)}) "
+                f"VALUES({','.join('?' * len(cols))})", vals)
             db.commit()
             return redirect(url_for("index"))
     return render_template("post.html", categories=CATEGORIES,
-                           cat=None, q="", error=error)
+                           cat=None, q="", error=error,
+                           employment_types=EMPLOYMENT_TYPES,
+                           remote_options=REMOTE_OPTIONS,
+                           experience_levels=EXPERIENCE_LEVELS)
 
 
 # ------------------------------- SEO --------------------------------

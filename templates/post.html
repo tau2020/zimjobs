@@ -13,6 +13,26 @@
     </label>
     <label>Summary <textarea name="summary" rows="5" required></textarea></label>
     <label>Apply URL <input name="apply_url" type="url" required></label>
+    <div class="form-grid">
+      <label>Job type
+        <select name="employment_type"><option value="">— optional —</option>
+          {% for o in employment_types %}<option>{{ o }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Workplace
+        <select name="remote_status"><option value="">— optional —</option>
+          {% for o in remote_options %}<option>{{ o }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Experience level
+        <select name="experience_level"><option value="">— optional —</option>
+          {% for o in experience_levels %}<option>{{ o }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Salary range <input name="salary_range" placeholder="e.g. $500–$800/month"></label>
+      <label>Application deadline <input name="expires_at" type="date"></label>
+      <label>Skills / tags <input name="tags" placeholder="comma-separated, e.g. Excel, M&E, Driving"></label>
+    </div>
     <label class="chk"><input type="checkbox" name="featured">
       Featured listing ($15 — invoice via PayPal)</label>
     <label>Admin token <input name="token" type="password" required></label>

@@ -2,7 +2,9 @@ from math import ceil
 from flask import (Blueprint, g, request, render_template, redirect,
                    url_for, abort, flash)
 
-from app import get_db, CATEGORIES, PER_PAGE
+from app import (get_db, CATEGORIES, PER_PAGE, EMPLOYMENT_TYPES,
+                 REMOTE_OPTIONS, EXPERIENCE_LEVELS, job_columns,
+                 optional_job_values)
 from auth import admin_required, check_csrf
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -71,20 +73,30 @@ def job_form(job_id=None):
             error = "All fields are required."
             job = dict(f)
         else:
-            vals = [f[k].strip() for k in fields] + \
-                   [1 if f.get("featured") else 0]
+            opt = optional_job_values(f, job_columns(db))
             if job_id:
-                db.execute("""UPDATE jobs SET title=?,company=?,location=?,
-                    category=?,summary=?,apply_url=?,featured=?
-                    WHERE id=?""", vals + [job_id])
+                set_cols = list(fields) + ["featured"] + list(opt.keys())
+                vals = [f[k].strip() for k in fields] + \
+                       [1 if f.get("featured") else 0] + list(opt.values())
+                db.execute(
+                    "UPDATE jobs SET " +
+                    ",".join(f"{c}=?" for c in set_cols) +
+                    " WHERE id=?", vals + [job_id])
             else:
-                db.execute("""INSERT INTO jobs(title,company,location,category,
-                    summary,apply_url,featured) VALUES(?,?,?,?,?,?,?)""", vals)
+                cols = list(fields) + ["featured"] + list(opt.keys())
+                vals = [f[k].strip() for k in fields] + \
+                       [1 if f.get("featured") else 0] + list(opt.values())
+                db.execute(
+                    f"INSERT INTO jobs({','.join(cols)}) "
+                    f"VALUES({','.join('?' * len(cols))})", vals)
             db.commit()
             flash("Job saved.")
             return redirect(url_for("admin.jobs"))
     return render_template("admin/job_form.html", job=job, job_id=job_id,
-                           error=error, categories=CATEGORIES, cat=None, q="")
+                           error=error, categories=CATEGORIES, cat=None, q="",
+                           employment_types=EMPLOYMENT_TYPES,
+                           remote_options=REMOTE_OPTIONS,
+                           experience_levels=EXPERIENCE_LEVELS)
 
 
 @admin_bp.route("/jobs/<int:job_id>/feature", methods=["POST"])

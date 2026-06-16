@@ -4,8 +4,8 @@
   "description": "Jobs in Zimbabwe and remote work for Zimbabweans.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#067a33",
-  "theme_color": "#067a33",
+  "background_color": "#F8FAFC",
+  "theme_color": "#0F766E",
   "icons": [
     { "src": "/static/icon.svg", "sizes": "any",
       "type": "image/svg+xml", "purpose": "any maskable" }
