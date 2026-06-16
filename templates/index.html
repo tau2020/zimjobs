@@ -4,50 +4,6 @@
 
 {% set qs %}q={{ filters.q|urlencode }}&cat={{ filters.cat|urlencode }}&type={{ filters.type|urlencode }}&remote={{ filters.remote|urlencode }}&exp={{ filters.exp|urlencode }}&loc={{ filters.loc|urlencode }}&sort={{ filters.sort|urlencode }}{% endset %}
 
-<details class="filterbar" open>
-  <summary>
-    <span>Job Filter</span>
-    {% if active_filters %}<span class="badge green">on</span>{% endif %}
-  </summary>
-  <form method="get" action="/" class="filter-form">
-    {% if filters.q %}<input type="hidden" name="q" value="{{ filters.q }}">{% endif %}
-    {% if filters.cat %}<input type="hidden" name="cat" value="{{ filters.cat }}">{% endif %}
-    <label>Location
-      <input type="search" name="loc" value="{{ filters.loc }}" placeholder="e.g. Harare, Bulawayo">
-    </label>
-    {% if type_options %}
-    <label>Job type
-      <select name="type"><option value="">Any</option>
-        {% for o in type_options %}<option {{ 'selected' if filters.type == o }}>{{ o }}</option>{% endfor %}
-      </select>
-    </label>
-    {% endif %}
-    {% if remote_options %}
-    <label>Workplace
-      <select name="remote"><option value="">Any</option>
-        {% for o in remote_options %}<option {{ 'selected' if filters.remote == o }}>{{ o }}</option>{% endfor %}
-      </select>
-    </label>
-    {% endif %}
-    {% if exp_options %}
-    <label>Experience
-      <select name="exp"><option value="">Any</option>
-        {% for o in exp_options %}<option {{ 'selected' if filters.exp == o }}>{{ o }}</option>{% endfor %}
-      </select>
-    </label>
-    {% endif %}
-    <label>Sort by
-      <select name="sort">
-        {% for k, v in sort_options.items() %}<option value="{{ k }}" {{ 'selected' if sort == k }}>{{ v }}</option>{% endfor %}
-      </select>
-    </label>
-    <div class="filter-actions">
-      <button class="btn sm" type="submit">Apply</button>
-      {% if active_filters %}<a class="btn sm ghost" href="/">Clear all</a>{% endif %}
-    </div>
-  </form>
-</details>
-
 <p class="meta">{{ total }} job{{ '' if total == 1 else 's' }}
   {%- if cat %} in {{ cat }}{% endif %}{% if q %} matching “{{ q }}”{% endif %}</p>
 
@@ -55,7 +11,7 @@
 <div class="card empty">
   <p class="empty-icon">🔍</p>
   <p><b>No jobs found.</b></p>
-  <p>Try a different keyword or clear your filters.</p>
+  <p>Try a different keyword or category.</p>
   <p><a class="btn sm" href="/">Browse all jobs</a></p>
 </div>
 {% endfor %}

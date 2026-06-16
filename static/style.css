@@ -191,34 +191,6 @@ footer a{color:var(--g)}
 .iconbtn.on{color:var(--gold);border-color:var(--gold)}
 .empty-icon{font-size:2rem;margin-bottom:.3rem}
 
-/* --------------------------- filter bar --------------------------- */
-.filterbar{position:sticky;top:calc(var(--sticky-filter-top) + .55rem);
-  z-index:8;background:var(--card);border:1.5px solid rgba(245,158,11,.62);
-  border-radius:var(--r);
-  box-shadow:0 6px 20px rgba(15,23,42,.08),0 0 0 3px rgba(245,158,11,.13);
-  margin-bottom:.8rem;max-height:calc(100vh - var(--sticky-filter-top) - 1.1rem);
-  overflow:auto;scrollbar-gutter:stable;transition:border-color .15s,box-shadow .15s}
-.filterbar>summary{list-style:none;cursor:pointer;padding:.7rem 1rem;
-  font-weight:700;color:var(--ink);display:flex;align-items:center;gap:.5rem;
-  background:linear-gradient(90deg,var(--gold-tint),var(--card) 58%)}
-.filterbar>summary::-webkit-details-marker{display:none}
-.filterbar>summary::before{content:"";width:.65rem;height:.65rem;border-radius:50%;
-  background:var(--gold);box-shadow:0 0 0 4px rgba(245,158,11,.18);flex:0 0 auto}
-.filterbar>summary::after{content:"▾";margin-left:auto;color:var(--mut);
-  transition:transform .15s}
-.filterbar[open]>summary::after{transform:rotate(180deg)}
-.filterbar:not([open]){border-color:rgba(15,118,110,.48);
-  box-shadow:0 5px 18px rgba(15,118,110,.13),0 0 0 3px rgba(204,251,241,.9)}
-.filterbar:not([open])>summary{background:linear-gradient(90deg,var(--blue-tint),var(--card) 66%)}
-.filter-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
-  gap:.6rem;padding:0 1rem 1rem}
-.filter-form label{display:block;font-size:.8rem;font-weight:600;color:var(--mut)}
-.filter-form input,.filter-form select{width:100%;padding:.5rem;margin-top:.25rem;
-  border:1px solid var(--input-line);border-radius:8px;font-size:.95rem;
-  font-family:inherit;background:var(--card);color:var(--ink)}
-.filter-actions{display:flex;align-items:flex-end;gap:.5rem;grid-column:1/-1}
-.filter-actions .btn{margin-top:0}
-
 /* ------------------------ detail page extras ---------------------- */
 .crumbs{font-size:.82rem;color:var(--mut);margin-bottom:.6rem}
 .crumbs a{color:var(--g);text-decoration:none}
