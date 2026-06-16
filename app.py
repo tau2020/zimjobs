@@ -11,6 +11,24 @@ from werkzeug.exceptions import HTTPException
 
 from job_schema import build_job_posting_json_ld
 
+SCRAPER_SRC = os.path.join(os.path.dirname(__file__), "zimjobs_scraper", "src")
+if os.path.isdir(SCRAPER_SRC) and SCRAPER_SRC not in sys.path:
+    sys.path.insert(0, SCRAPER_SRC)
+try:
+    from zimjobs_scraper.normalization import (
+        is_probable_merged_job_text as _is_probable_merged_job_text,
+        normalize_job_text as _normalize_job_text,
+    )
+except ImportError:  # pragma: no cover - fallback for unusual deployments.
+    def _normalize_job_text(value, *, max_chars=None, **_):
+        text = re.sub(r"[ \t\f\v]+", " ", str(value or "").replace("\r\n", "\n").replace("\r", "\n"))
+        text = "\n".join(line.strip() for line in text.split("\n"))
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        return text[:max_chars].rsplit(" ", 1)[0].rstrip(".,;:-") if max_chars and len(text) > max_chars else text
+
+    def _is_probable_merged_job_text(_title, _text):
+        return False
+
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -391,8 +409,29 @@ def optional_job_values(form, cols):
     out = {}
     for col in OPTIONAL_JOB_COLUMNS:
         if col in cols and col in form:
-            out[col] = form.get(col, "").strip() or None
+            out[col] = clean_job_form_value(col, form.get(col, "")) or None
     return out
+
+
+MULTILINE_JOB_FIELDS = {"summary", "job_description", "requirements"}
+
+
+def clean_job_display_text(value, max_chars=12000):
+    return _normalize_job_text(value, max_chars=max_chars)
+
+
+def clean_inline_job_text(value):
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def clean_job_form_value(field, value):
+    if field in MULTILINE_JOB_FIELDS:
+        return clean_job_display_text(value)
+    return clean_inline_job_text(value)
+
+
+def clean_core_job_values(form, fields):
+    return {field: clean_job_form_value(field, form.get(field, "")) for field in fields}
 
 
 def distinct_values(db, column):
@@ -420,6 +459,11 @@ def tags(text):
     return [t.strip() for t in re.split(r"[,;|]", text) if t.strip()][:8]
 
 
+@app.template_filter("job_text")
+def job_text(value):
+    return clean_job_display_text(value)
+
+
 STOP_WORDS = {
     "and", "are", "but", "can", "for", "from", "has", "have", "hire",
     "job", "jobs", "must", "not", "our", "the", "this", "via", "with",
@@ -431,6 +475,11 @@ STOP_WORDS = {
 def row_value(row, key, default=""):
     """Read optional sqlite.Row columns without assuming every DB is migrated."""
     return row[key] if key in row.keys() and row[key] is not None else default
+
+
+def row_looks_accidentally_merged(row):
+    text = row_value(row, "job_description") or row_value(row, "summary")
+    return _is_probable_merged_job_text(row["title"], clean_job_display_text(text))
 
 
 def normalize_token(token):
@@ -521,6 +570,8 @@ def similar_jobs(db, job, limit=SIMILAR_LIMIT):
     ranked, fallback = [], []
     for candidate in candidates:
         if is_closed_job(candidate):
+            continue
+        if row_looks_accidentally_merged(candidate):
             continue
 
         fallback.append(candidate)
@@ -648,6 +699,7 @@ def index():
             "SELECT jobs.* " + base +
             f" ORDER BY {order} LIMIT ? OFFSET ?",
             args + [PER_PAGE, (page - 1) * PER_PAGE]).fetchall()
+        jobs = [job for job in jobs if not row_looks_accidentally_merged(job)]
     except sqlite3.OperationalError as exc:
         log_event(
             logging.ERROR,
@@ -678,7 +730,7 @@ def index():
 def job(job_id, s=None):
     db  = get_db()
     row = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
-    if not row or is_closed_job(row):
+    if not row or is_closed_job(row) or row_looks_accidentally_merged(row):
         abort(404)
     url = f"{SITE_URL}/job/{row['id']}/{slug(row['title'])}"
     similar = similar_jobs(db, row)
@@ -700,21 +752,20 @@ def post():
     error = None
     if request.method == "POST":
         f = request.form
+        core = ("title", "company", "location", "category",
+                "summary", "apply_url")
+        cleaned_core = clean_core_job_values(f, core)
         if f.get("token") != ADMIN_TOKEN:
             error = "Invalid admin token."
-        elif not all(f.get(k, "").strip() for k in
-                     ("title", "company", "location", "category",
-                      "summary", "apply_url")):
+        elif not all(cleaned_core.get(k) for k in core):
             error = "All fields are required."
         elif form_values_are_closed(f):
             error = "Closed or expired jobs are not published."
         else:
             db   = get_db()
-            core = ("title", "company", "location", "category",
-                    "summary", "apply_url")
             opt  = optional_job_values(f, job_columns(db))
             cols = list(core) + ["featured"] + list(opt.keys())
-            vals = [f[k].strip() for k in core] + \
+            vals = [cleaned_core[k] for k in core] + \
                    [1 if f.get("featured") else 0] + list(opt.values())
             db.execute(
                 f"INSERT INTO jobs({','.join(cols)}) "
@@ -752,10 +803,11 @@ def feed():
     rows = db.execute(
         f"SELECT * FROM jobs WHERE {where} ORDER BY created_at DESC LIMIT 30"
     ).fetchall()
+    rows = [row for row in rows if not row_looks_accidentally_merged(row)]
     items = "".join(
         f"<item><title>{escape(r['title'])} — {escape(r['company'])}</title>"
         f"<link>{SITE_URL}/job/{r['id']}/{slug(r['title'])}</link>"
-        f"<description>{escape(r['summary'])}</description>"
+        f"<description>{escape(clean_job_display_text(r['summary']))}</description>"
         f"<guid>{SITE_URL}/job/{r['id']}</guid></item>" for r in rows)
     return Response('<?xml version="1.0" encoding="UTF-8"?>'
                     '<rss version="2.0"><channel>'

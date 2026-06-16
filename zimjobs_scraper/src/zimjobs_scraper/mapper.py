@@ -14,6 +14,7 @@ from .normalization import (
     infer_company,
     looks_like_good_company,
     make_summary,
+    normalize_job_text,
     normalize_category,
     normalize_employment_type,
     normalize_location,
@@ -25,7 +26,8 @@ from .parsers import SourceConfig
 
 def map_raw_job(raw: RawJob, config: SourceConfig) -> JobRecord:
     original_title = clean_text(raw.title)
-    body = clean_text(raw.summary or raw.description_html or "", max_spaces=False)
+    body = normalize_job_text(raw.summary) or clean_html_body(raw.description_html)
+    body = normalize_job_text(body, max_chars=12000)
 
     parsed_company = clean_text(raw.company)
     if looks_like_good_company(parsed_company):
@@ -41,7 +43,7 @@ def map_raw_job(raw: RawJob, config: SourceConfig) -> JobRecord:
     expires_at = raw.expires_at or find_deadline(f"{original_title}\n{body}")
     remote_status = clean_text(raw.remote_status) or normalize_remote_status(location, body)
     department = clean_text(raw.department) or extract_labeled_value(body, ["Department", "Team", "Unit", "Programme", "Program"])
-    requirements = clean_text(raw.requirements, max_spaces=False) or extract_section(
+    requirements = normalize_job_text(raw.requirements, max_chars=1800) or extract_section(
         body,
         [
             "Requirements",
@@ -53,13 +55,14 @@ def map_raw_job(raw: RawJob, config: SourceConfig) -> JobRecord:
             "Candidate Profile",
         ],
     )
-    apply_url = normalize_url(raw.apply_url, raw.source_url) or normalize_url(raw.source_url) or ""
-    summary = make_summary(original_title, body)
+    source_url = normalize_url(raw.source_url) or ""
+    apply_url = normalize_url(raw.apply_url, source_url) or source_url
+    summary = normalize_job_text(make_summary(original_title, body), max_chars=900)
 
     # Preserve traceability even when the existing DB has only the legacy `summary` column.
     meta_bits = [f"Source: {raw.source_name}"]
-    if raw.source_url:
-        meta_bits.append(raw.source_url)
+    if source_url:
+        meta_bits.append(source_url)
     if expires_at:
         meta_bits.append(f"Deadline: {expires_at}")
     if employment_type:
@@ -72,9 +75,9 @@ def map_raw_job(raw: RawJob, config: SourceConfig) -> JobRecord:
         meta_bits.append(f"Workplace: {remote_status}")
     source_line = "\n\n" + " | ".join(meta_bits)
     if len(summary) + len(source_line) <= 1100:
-        summary = f"{summary}{source_line}"
+        summary = normalize_job_text(f"{summary}{source_line}", max_chars=1100, remove_noise=False)
 
-    digest = content_hash([title, company, location, summary, apply_url, raw.source_url])
+    digest = content_hash([title, company, location, summary, apply_url, source_url, raw.external_id])
     return JobRecord(
         title=title,
         company=company,
@@ -84,7 +87,7 @@ def map_raw_job(raw: RawJob, config: SourceConfig) -> JobRecord:
         apply_url=apply_url,
         featured=0,
         source_name=raw.source_name,
-        source_url=raw.source_url,
+        source_url=source_url,
         posted_at=raw.posted_at,
         expires_at=expires_at,
         department=department,
@@ -93,7 +96,13 @@ def map_raw_job(raw: RawJob, config: SourceConfig) -> JobRecord:
         remote_status=remote_status,
         job_description=body,
         requirements=requirements,
-        external_job_id=raw.external_id,
+        external_job_id=clean_text(raw.external_id) or None,
         content_hash=digest,
         scraped_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
     )
+
+
+def clean_html_body(value: str | None) -> str:
+    from .normalization import clean_html_to_markdownish
+
+    return normalize_job_text(clean_html_to_markdownish(value))

@@ -46,11 +46,11 @@
   {% if tg %}<p class="chips">{% for t in tg %}<span class="chip">{{ t }}</span>{% endfor %}</p>{% endif %}
 
   <h2 class="sec">Job description</h2>
-  <p class="body">{{ job['job_description'] or job['summary'] }}</p>
+  <div class="body">{{ (job['job_description'] or job['summary'])|job_text }}</div>
 
   {% if job['requirements'] %}
   <h2 class="sec">Requirements</h2>
-  <p class="body">{{ job['requirements'] }}</p>
+  <div class="body">{{ job['requirements']|job_text }}</div>
   {% endif %}
 
   <a class="btn" href="{{ job['apply_url'] }}" rel="nofollow noopener" target="_blank">Apply on official site →</a>

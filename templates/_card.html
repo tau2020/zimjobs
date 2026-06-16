@@ -19,7 +19,8 @@
     {% if dl %}<span class="fact due{{ ' urgent' if 'Closes' in dl }}">⏳ {{ dl }}</span>{% endif %}
   </p>
   {% endif %}
-  <p class="sum">{{ j['summary'][:150] }}{% if j['summary']|length > 150 %}…{% endif %}</p>
+  {% set clean_summary = j['summary']|job_text %}
+  <p class="sum">{{ clean_summary[:150] }}{% if clean_summary|length > 150 %}…{% endif %}</p>
   {% set tg = j['tags']|tags %}
   {% if tg %}<p class="chips">{% for t in tg %}<span class="chip">{{ t }}</span>{% endfor %}</p>{% endif %}
   <div class="card-foot">

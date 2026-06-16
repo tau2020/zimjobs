@@ -5,7 +5,13 @@ from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from .models import JobRecord
-from .normalization import is_expired, looks_like_good_company, looks_like_real_role
+from .normalization import (
+    is_expired,
+    is_probable_merged_job_text,
+    looks_like_good_company,
+    looks_like_real_role,
+    normalize_job_text,
+)
 
 
 @dataclass(slots=True)
@@ -36,7 +42,7 @@ class JobValidator:
 
     def validate(self, job: JobRecord) -> ValidationResult:
         reasons: list[str] = []
-        if len(job.title) < 5:
+        if not job.title or len(job.title) < 5:
             reasons.append("title_too_short")
         if len(job.title) > 120 or re.search(r"\|\s*(apply by|deadline|closing date|earn|salary)", job.title, re.I):
             reasons.append("title_not_clean")
@@ -48,9 +54,20 @@ class JobValidator:
             reasons.append("company_not_clean")
         if len(job.summary) < 80:
             reasons.append("summary_too_short")
+        description = normalize_job_text(job.job_description or job.summary)
+        if not description:
+            reasons.append("description_missing")
+        if len(description) > 12000:
+            reasons.append("description_too_long")
+        if is_probable_merged_job_text(job.title, description):
+            reasons.append("probable_merged_listing")
         parsed = urlparse(job.apply_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             reasons.append("apply_url_invalid")
+        source_url = job.source_url or ""
+        parsed_source = urlparse(source_url)
+        if not source_url or parsed_source.scheme not in {"http", "https"} or not parsed_source.netloc:
+            reasons.append("source_url_invalid")
         if self.skip_expired and is_expired(job.expires_at):
             reasons.append("expired")
         if self.allowed_locations:

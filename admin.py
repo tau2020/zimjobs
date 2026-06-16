@@ -4,7 +4,8 @@ from flask import (Blueprint, g, request, render_template, redirect,
 
 from app import (get_db, CATEGORIES, PER_PAGE, EMPLOYMENT_TYPES,
                  REMOTE_OPTIONS, EXPERIENCE_LEVELS, job_columns,
-                 optional_job_values, form_values_are_closed)
+                 optional_job_values, form_values_are_closed,
+                 clean_core_job_values)
 from auth import admin_required, check_csrf
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -69,7 +70,8 @@ def job_form(job_id=None):
         f = request.form
         fields = ("title", "company", "location", "category",
                   "summary", "apply_url")
-        if not all(f.get(k, "").strip() for k in fields):
+        cleaned_core = clean_core_job_values(f, fields)
+        if not all(cleaned_core.get(k) for k in fields):
             error = "All fields are required."
             job = dict(f)
         elif form_values_are_closed(f):
@@ -79,7 +81,7 @@ def job_form(job_id=None):
             opt = optional_job_values(f, job_columns(db))
             if job_id:
                 set_cols = list(fields) + ["featured"] + list(opt.keys())
-                vals = [f[k].strip() for k in fields] + \
+                vals = [cleaned_core[k] for k in fields] + \
                        [1 if f.get("featured") else 0] + list(opt.values())
                 db.execute(
                     "UPDATE jobs SET " +
@@ -87,7 +89,7 @@ def job_form(job_id=None):
                     " WHERE id=?", vals + [job_id])
             else:
                 cols = list(fields) + ["featured"] + list(opt.keys())
-                vals = [f[k].strip() for k in fields] + \
+                vals = [cleaned_core[k] for k in fields] + \
                        [1 if f.get("featured") else 0] + list(opt.values())
                 db.execute(
                     f"INSERT INTO jobs({','.join(cols)}) "

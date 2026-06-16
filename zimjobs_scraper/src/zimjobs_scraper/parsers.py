@@ -14,13 +14,16 @@ from .models import RawJob
 from .normalization import (
     clean_html_to_markdownish,
     clean_text,
+    content_hash,
     extract_company_from_text,
     extract_labeled_value,
     extract_role_from_text,
     extract_section,
     find_deadline,
+    is_probable_merged_job_text,
     looks_like_good_company,
     looks_like_real_role,
+    normalize_job_text,
     normalize_url,
     parse_date,
 )
@@ -188,6 +191,45 @@ class BaseParser:
     def _soup(self, html: str) -> BeautifulSoup:
         return BeautifulSoup(html, "html.parser")
 
+    def _remove_unrelated_nodes(self, root: Tag | BeautifulSoup) -> None:
+        for bad_selector in [
+            "nav",
+            "header",
+            "footer",
+            "script",
+            "style",
+            "form",
+            "aside",
+            "noscript",
+            "iframe",
+            "[hidden]",
+            "[aria-hidden='true']",
+        ]:
+            for node in root.select(bad_selector):
+                node.decompose()
+        noisy_token_re = re.compile(
+            r"(?:^|[-_\s])(?:"
+            r"breadcrumb|pagination|pager|sidebar|widget|menu|nav|footer|header|"
+            r"related|similar|recommended|latest|more[-_\s]?jobs|job[-_\s]?list|jobs[-_\s]?list|"
+            r"search|filter|sort|share|social|comment|newsletter|cookie|advert|ads?"
+            r")(?:$|[-_\s])",
+            re.I,
+        )
+        for node in list(root.find_all(True)):
+            style = node.get("style", "")
+            if style and re.search(r"display\s*:\s*none|visibility\s*:\s*hidden", style, re.I):
+                node.decompose()
+                continue
+            token = " ".join(
+                [
+                    str(node.get("id", "")),
+                    " ".join(str(c) for c in node.get("class", [])),
+                    str(node.get("role", "")),
+                ]
+            )
+            if noisy_token_re.search(token):
+                node.decompose()
+
     def _meta(self, soup: BeautifulSoup, *names: str) -> str:
         for name in names:
             tag = soup.find("meta", attrs={"property": name}) or soup.find("meta", attrs={"name": name})
@@ -256,6 +298,40 @@ class GenericParser(BaseParser):
     """Fallback parser for simple HTML pages and screenshots copied as HTML/text."""
 
     JOB_URL_PATTERNS = ("/jobs/", "/job/", "/careers/", "/career/", "/vacanc", "/position", "/202", "/opportun")
+    CARD_SELECTORS = (
+        "[data-job-id]",
+        "[data-jobid]",
+        "[data-testid*='job-card' i]",
+        ".job-card",
+        ".job_card",
+        ".job-listing",
+        ".job_listing",
+        ".job-item",
+        ".job_item",
+        ".vacancy-card",
+        ".vacancy-item",
+        "article[class*='job' i]",
+        "li[class*='job' i]",
+        "tr[class*='job' i]",
+    )
+
+    def parse_listing_payload(self, payload: str, url: str) -> list[RawJob]:
+        # If normal job-detail links are available, let the pipeline fetch the
+        # detail page. Card parsing is a fallback for source pages that expose
+        # independent listing cards but no usable detail URL.
+        if self.list_job_urls(payload, url):
+            return []
+        soup = self._soup(payload)
+        if self._looks_like_single_detail_page(soup, url):
+            return []
+        jobs: list[RawJob] = []
+        for index, card in enumerate(self._job_card_nodes(soup), start=1):
+            raw = self._raw_from_card(card, url, index)
+            if raw:
+                jobs.append(raw)
+        if jobs:
+            log.info("listing_cards_parsed", extra={"source": self.config.name, "url": url, "status": len(jobs)})
+        return jobs
 
     def list_job_urls(self, html: str, base_url: str) -> list[str]:
         soup = self._soup(html)
@@ -289,8 +365,10 @@ class GenericParser(BaseParser):
             if any(pat in path for pat in self.JOB_URL_PATTERNS) or re.search(r"job|vacanc|hiring|apply|career|opportun|opening|position", text, flags=re.I):
                 seen.add(href)
                 urls.append(href)
-        if not urls and not self.config.include_url_patterns and re.search(r"job|vacanc|hiring|apply|career|opportun", clean_text(soup.get_text(" ")), flags=re.I):
+        if not urls and not self.config.include_url_patterns and self._looks_like_single_detail_page(soup, base_url):
             urls.append(base_url)
+        elif not urls and self._looks_like_listing_page(soup, base_url):
+            log.info("listing_page_without_detail_links", extra={"source": self.config.name, "url": base_url, "status": "skipped"})
         return urls
 
     def parse_detail(self, html: str, url: str) -> RawJob | None:
@@ -298,14 +376,18 @@ class GenericParser(BaseParser):
         json_jobs = self._json_ld_jobs(soup, url)
         if json_jobs:
             return json_jobs[0]
+        if self._looks_like_listing_page(soup, url):
+            log.info("parse_detail_skipped_listing_page", extra={"source": self.config.name, "url": url, "status": "listing_page"})
+            return None
         title = clean_text((soup.find("h1") or Tag(name="")).get_text(" ")) or self._meta(soup, "og:title", "twitter:title") or clean_text((soup.find("title") or Tag(name="")).get_text(" "))
         if not title:
             return None
-        main = soup.find("main") or soup.find("article") or soup.find("body") or soup
-        for bad_selector in ["nav", "header", "footer", "script", "style", "form", "aside"]:
-            for node in main.select(bad_selector):
-                node.decompose()
+        main = self._detail_container(soup)
+        self._remove_unrelated_nodes(main)
         description = clean_html_to_markdownish(str(main))
+        if is_probable_merged_job_text(title, description):
+            log.info("parse_detail_skipped_merged_text", extra={"source": self.config.name, "url": url, "job_title": title, "status": "merged_text"})
+            return None
         company = (
             extract_labeled_value(description, ["Company", "Organisation", "Organization", "Employer", "Hiring Organization"])
             or self._meta(soup, "article:author", "author")
@@ -340,7 +422,7 @@ class GenericParser(BaseParser):
             text = clean_text(a.get_text(" "))
             if re.search(r"apply|view full|job call|application|official site", text, re.I):
                 href = normalize_url(a["href"], base_url)
-                if href:
+                if href and not self._is_excluded_url(href):
                     return href
         return None
 
@@ -352,6 +434,169 @@ class GenericParser(BaseParser):
                 if value and len(value) < 120:
                     return value
         return None
+
+    def _detail_container(self, soup: BeautifulSoup) -> Tag | BeautifulSoup:
+        custom_selector = self.config.selectors.get("detail_container") or self.config.selectors.get("description")
+        selectors = [
+            custom_selector,
+            "[itemtype*='JobPosting' i]",
+            ".job-detail",
+            ".job-details",
+            ".job-description",
+            ".job_description",
+            ".single_job_listing",
+            "article",
+            "main",
+        ]
+        for selector in selectors:
+            if not selector:
+                continue
+            node = soup.select_one(selector)
+            if isinstance(node, Tag):
+                return node
+        return soup.find("body") or soup
+
+    def _job_card_nodes(self, soup: BeautifulSoup) -> list[Tag]:
+        selectors = [self.config.selectors.get("job_cards"), *self.CARD_SELECTORS]
+        nodes: list[Tag] = []
+        seen: set[int] = set()
+        container_re = re.compile(r"(?:list|grid|container|wrapper|search|filter|header|sidebar|nav|menu)", re.I)
+        for selector in selectors:
+            if not selector:
+                continue
+            for node in soup.select(selector):
+                if not isinstance(node, Tag) or id(node) in seen:
+                    continue
+                token = " ".join([str(node.get("id", "")), " ".join(str(c) for c in node.get("class", []))])
+                if node.name in {"html", "body", "main"} or container_re.search(token):
+                    continue
+                text = normalize_job_text(node.get_text("\n"), max_chars=5000)
+                if len(text) < 40 or len(text) > 5000:
+                    continue
+                seen.add(id(node))
+                nodes.append(node)
+        # Drop outer duplicate wrappers while keeping the most specific cards.
+        node_ids = {id(node) for node in nodes}
+        return [node for node in nodes if not any(id(child) in node_ids for child in node.find_all(True))]
+
+    def _raw_from_card(self, card: Tag, base_url: str, index: int) -> RawJob | None:
+        title = self._card_title(card)
+        if not title:
+            log.info("listing_card_skipped", extra={"source": self.config.name, "url": base_url, "status": "missing_title"})
+            return None
+        detail_url = self._card_url(card, base_url)
+        source_url = detail_url or base_url
+        description = normalize_job_text(card.get_text("\n"), max_chars=3000)
+        if is_probable_merged_job_text(title, description):
+            log.info("listing_card_skipped", extra={"source": self.config.name, "url": base_url, "job_title": title, "status": "merged_card"})
+            return None
+        company = self._card_field(card, ["company", "organisation", "organization", "employer"]) or extract_company_from_text(title, description)
+        location = self._card_field(card, ["location", "city", "country", "duty-station", "work-location"]) or self.config.default_location
+        employment_type = self._card_field(card, ["type", "job-type", "employment", "contract"])
+        salary = self._card_field(card, ["salary", "compensation", "pay"])
+        external_id = (
+            clean_text(card.get("data-job-id") or card.get("data-jobid") or card.get("data-id"))
+            or content_hash([self.config.name, base_url, title, company, location, str(index)])[:16]
+        )
+        return RawJob(
+            source_name=self.config.name,
+            source_url=source_url,
+            title=title,
+            company=company,
+            location=location,
+            category=self.config.default_category,
+            summary=description,
+            description_html=str(card),
+            apply_url=detail_url or base_url,
+            expires_at=find_deadline(description),
+            employment_type=employment_type,
+            salary_range=salary,
+            external_id=external_id,
+            requirements=extract_section(description, ["Requirements", "Qualifications", "Qualifications and Experience", "Required Skills"]),
+            extra={"listing_card": True, "listing_url": base_url},
+        )
+
+    def _card_title(self, card: Tag) -> str | None:
+        selectors = [
+            self.config.selectors.get("title"),
+            "[class*='title' i]",
+            "h1",
+            "h2",
+            "h3",
+            "a",
+        ]
+        for selector in selectors:
+            if not selector:
+                continue
+            for node in card.select(selector):
+                text = clean_text(node.get_text(" "))
+                text = re.sub(r"\s*\|\s*(?:apply|deadline|closing date).*$", "", text, flags=re.I)
+                if 5 <= len(text) <= 140 and (looks_like_real_role(text) or re.search(r"\b(?:officer|manager|assistant|engineer|developer|coordinator|analyst|accountant|consultant|intern)\b", text, re.I)):
+                    return text
+        for raw_line in normalize_job_text(card.get_text("\n")).splitlines()[:6]:
+            line = clean_text(raw_line)
+            if 5 <= len(line) <= 140 and looks_like_real_role(line):
+                return line
+        return None
+
+    def _card_url(self, card: Tag, base_url: str) -> str | None:
+        for selector in [self.config.selectors.get("job_links"), "a[href]"]:
+            if not selector:
+                continue
+            for a in card.select(selector):
+                if not isinstance(a, Tag) or not a.get("href"):
+                    continue
+                href = normalize_url(a.get("href"), base_url)
+                if not href or self._is_excluded_url(href):
+                    continue
+                if not self.config.allow_external_detail_urls and not self._same_origin(href, base_url):
+                    continue
+                if self._allowed_by_config_patterns(href):
+                    return href
+        return None
+
+    def _card_field(self, card: Tag, field_names: Iterable[str]) -> str | None:
+        names = list(field_names)
+        selector_parts = []
+        for name in names:
+            selector_parts.extend([f"[class*='{name}' i]", f"[data-testid*='{name}' i]"])
+        for selector in selector_parts:
+            node = card.select_one(selector)
+            if node:
+                value = clean_text(node.get_text(" "))
+                if 2 <= len(value) <= 160:
+                    return value
+        text = normalize_job_text(card.get_text("\n"))
+        labels = [name.replace("-", " ").replace("_", " ").title() for name in names]
+        return extract_labeled_value(text, labels)
+
+    def _looks_like_listing_page(self, soup: BeautifulSoup, base_url: str) -> bool:
+        h1 = clean_text((soup.find("h1") or Tag(name="")).get_text(" "))
+        if looks_like_real_role(h1):
+            return False
+        if len(self._job_card_nodes(soup)) > 1:
+            return True
+        page_title = " ".join([h1, clean_text((soup.find("title") or Tag(name="")).get_text(" "))])
+        if re.search(r"\b(?:jobs?|vacancies|careers|opportunities|search results|category)\b", page_title, re.I):
+            return True
+        text = clean_text(soup.get_text(" "))
+        roleish_links = 0
+        for a in soup.find_all("a", href=True):
+            link_text = clean_text(a.get_text(" "))
+            if looks_like_real_role(link_text):
+                roleish_links += 1
+        return roleish_links >= 4 or bool(re.search(r"\b(?:showing\s+\d+|jobs found|filter by|sort by|load more)\b", text, re.I))
+
+    def _looks_like_single_detail_page(self, soup: BeautifulSoup, base_url: str) -> bool:
+        if self._json_ld_jobs(soup, base_url):
+            return True
+        if self._looks_like_listing_page(soup, base_url):
+            return False
+        path = urlparse(base_url).path.lower().rstrip("/")
+        if any(pat.strip("/") in path for pat in self.JOB_URL_PATTERNS) and not re.search(r"/(?:jobs?|careers?|vacancies)$", path):
+            return True
+        h1 = clean_text((soup.find("h1") or Tag(name="")).get_text(" "))
+        return looks_like_real_role(h1)
 
 
 class RssFeedParser(BaseParser):
@@ -735,11 +980,12 @@ class ApplyNowParser(GenericParser):
     def parse_detail(self, html: str, url: str) -> RawJob | None:
         soup = self._soup(html)
         article = soup.find("article") or soup.find("main") or soup.find("body") or soup
-        for bad_selector in ["nav", "header", "footer", "script", "style", "form", "aside"]:
-            for node in article.select(bad_selector):
-                node.decompose()
+        self._remove_unrelated_nodes(article)
         title = clean_text((soup.find("h1") or soup.find("title") or Tag(name="")).get_text(" "))
         description = clean_html_to_markdownish(str(article))
+        if is_probable_merged_job_text(title, description):
+            log.info("parse_detail_skipped_merged_text", extra={"source": self.config.name, "url": url, "job_title": title, "status": "merged_text"})
+            return None
         text = clean_text(description, max_spaces=False)
         role = extract_role_from_text(text)
         if role:
@@ -810,10 +1056,11 @@ class ImpactPoolParser(GenericParser):
         if not title:
             return None
         main = soup.find("main") or soup.find("article") or soup.find("body") or soup
-        for bad_selector in ["nav", "header", "footer", "script", "style", "form"]:
-            for node in main.select(bad_selector):
-                node.decompose()
+        self._remove_unrelated_nodes(main)
         description = clean_html_to_markdownish(str(main))
+        if is_probable_merged_job_text(title, description):
+            log.info("parse_detail_skipped_merged_text", extra={"source": self.config.name, "url": url, "job_title": title, "status": "merged_text"})
+            return None
         text = clean_text(description, max_spaces=False)
         company = None
         h1 = soup.find("h1")
@@ -871,10 +1118,11 @@ class PscERecruitmentParser(GenericParser):
         if not title:
             return None
         main = soup.find("main") or soup.find("body") or soup
-        for bad_selector in ["nav", "header", "footer", "script", "style", "form"]:
-            for node in main.select(bad_selector):
-                node.decompose()
+        self._remove_unrelated_nodes(main)
         description = clean_html_to_markdownish(str(main))
+        if is_probable_merged_job_text(title, description):
+            log.info("parse_detail_skipped_merged_text", extra={"source": self.config.name, "url": url, "job_title": title, "status": "merged_text"})
+            return None
         text = clean_text(description, max_spaces=False)
         location = self._extract_location(text) or self.config.default_location
         reference = self._extract_labeled(text, ["Ref", "Reference"])
@@ -969,7 +1217,12 @@ class SomewhereParser(GenericParser):
         location = self._extract_labeled(text, ["Location", "Work Location"]) or "Remote"
         salary = self._extract_labeled(text, ["Compensation", "Salary"])
         employment_type = self._extract_labeled(text, ["Job Type", "Employment Type"])
-        description = clean_html_to_markdownish(str(soup.find("main") or soup.find("body") or soup))
+        main = soup.find("main") or soup.find("body") or soup
+        self._remove_unrelated_nodes(main)
+        description = clean_html_to_markdownish(str(main))
+        if is_probable_merged_job_text(title, description):
+            log.info("parse_detail_skipped_merged_text", extra={"source": self.config.name, "url": url, "job_title": title, "status": "merged_text"})
+            return None
         apply_url = self._find_apply_url(soup, url) or url
         return RawJob(
             source_name=self.config.name,

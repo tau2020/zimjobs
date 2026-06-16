@@ -184,6 +184,33 @@ def test_homepage_filterbar_is_open_by_default(tmp_path, monkeypatch):
     assert filterbar.has_attr("open")
 
 
+def test_probable_merged_scraped_row_is_not_rendered(tmp_path, monkeypatch):
+    web_app = import_web_app(tmp_path, monkeypatch)
+    merged_id = insert_job(
+        web_app,
+        title="Finance Officer",
+        company="Example NGO",
+        location="Harare",
+        summary=(
+            "Job Title: Finance Officer\nManage donor finance and grant reports.\n"
+            "Job Title: Operations Coordinator\nCoordinate procurement and operations.\n"
+            "Job Title: HR Assistant\nMaintain recruitment records and onboarding files."
+        ),
+        job_description=(
+            "Job Title: Finance Officer\nManage donor finance and grant reports.\n"
+            "Job Title: Operations Coordinator\nCoordinate procurement and operations.\n"
+            "Job Title: HR Assistant\nMaintain recruitment records and onboarding files."
+        ),
+    )
+
+    client = web_app.app.test_client()
+    detail_response = client.get(f"/job/{merged_id}/finance-officer")
+    listing_response = client.get("/")
+
+    assert detail_response.status_code == 404
+    assert "Operations Coordinator" not in listing_response.get_data(as_text=True)
+
+
 def import_web_app(tmp_path, monkeypatch):
     for module_name in ("admin", "auth", "app"):
         sys.modules.pop(module_name, None)

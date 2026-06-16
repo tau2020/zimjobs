@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sqlite3
 from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Iterable
 
-from .dedupe import canonical_url_key, normalized_key, similar
+from .dedupe import canonical_url_key, identity_keys, normalized_key, similar
 from .models import JobRecord
 
 log = logging.getLogger(__name__)
@@ -78,22 +79,60 @@ class SQLiteJobRepository:
 
     def existing_candidates(self) -> list[sqlite3.Row]:
         cols = self.columns()
-        selected = [c for c in ["id", "title", "company", "location", "summary", "apply_url", "content_hash"] if c in cols]
+        selected = [
+            c
+            for c in [
+                "id",
+                "title",
+                "company",
+                "location",
+                "summary",
+                "apply_url",
+                "source_name",
+                "source_url",
+                "external_job_id",
+                "content_hash",
+            ]
+            if c in cols
+        ]
         return self.conn.execute(f"SELECT {', '.join(selected)} FROM {self.table_name}").fetchall()
 
     def exists_duplicate(self, job: JobRecord) -> bool:
         rows = self.existing_candidates()
-        incoming_url = canonical_url_key(job.apply_url)
         incoming_key = normalized_key(job)
+        incoming_identities = set(identity_keys(job))
         for row in rows:
-            if row["apply_url"] and canonical_url_key(row["apply_url"]) == incoming_url:
-                return True
             if "content_hash" in row.keys() and row["content_hash"] and job.content_hash and row["content_hash"] == job.content_hash:
                 return True
-            row_key = "|".join([str(row["title"] or "").lower(), str(row["company"] or "").lower(), str(row["location"] or "").lower()])
+            row_key = "|".join(
+                re.sub(r"\W+", " ", str(row[col] or "").lower()).strip()
+                for col in ["title", "company", "location"]
+            )
+            row_identities = set(self._row_identity_keys(row))
+            shared_identities = incoming_identities & row_identities
+            if any(identity.startswith("external:") for identity in shared_identities):
+                return True
+            if shared_identities:
+                if incoming_key == row_key or similar(row["summary"] or "", job.summary) >= 0.90:
+                    return True
             if incoming_key == row_key and similar(row["summary"] or "", job.summary) >= 0.90:
                 return True
         return False
+
+    def _row_identity_keys(self, row: sqlite3.Row) -> list[str]:
+        source_name = row["source_name"] if "source_name" in row.keys() else None
+        external_job_id = row["external_job_id"] if "external_job_id" in row.keys() else None
+        if source_name and external_job_id:
+            external = re.sub(r"\W+", " ", str(external_job_id).strip().lower()).strip()
+            return [f"external:{str(source_name).strip().lower()}:{external}"] if external else []
+        keys = []
+        source_url = canonical_url_key(row["source_url"] if "source_url" in row.keys() else "")
+        apply_url = canonical_url_key(row["apply_url"] if "apply_url" in row.keys() else "")
+        if source_url:
+            keys.append(f"source:{source_url}")
+        if apply_url and apply_url != source_url:
+            keys.append(f"apply:{apply_url}")
+        return keys
 
     def insert(self, job: JobRecord) -> bool:
         if self.exists_duplicate(job):

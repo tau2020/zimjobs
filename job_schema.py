@@ -219,9 +219,9 @@ def text_from_html(value: Any) -> str:
     if not text:
         return ""
     if not re.search(r"<[A-Za-z/][^>]*>", text):
-        return html.unescape(text)
+        return clean_schema_text(text)
     if BeautifulSoup is None:
-        return html.unescape(re.sub(r"<[^>]+>", " ", text))
+        return clean_schema_text(re.sub(r"<[^>]+>", " ", text))
     soup = BeautifulSoup(text, "html.parser")
     for bad in soup(["script", "style", "noscript", "svg", "form", "iframe"]):
         bad.decompose()
@@ -229,11 +229,11 @@ def text_from_html(value: Any) -> str:
         br.replace_with("\n")
     for block in soup.find_all(["p", "li", "div", "section", "article"]):
         block.insert_after("\n")
-    return html.unescape(soup.get_text(" "))
+    return clean_schema_text(html.unescape(soup.get_text("\n")))
 
 
 def strip_source_metadata(value: str) -> str:
-    paragraphs = re.split(r"\n\s*\n", value.replace("\r\n", "\n").replace("\r", "\n"))
+    paragraphs = re.split(r"\n\s*\n", clean_schema_text(value))
     kept = []
     for paragraph in paragraphs:
         cleaned = paragraph.strip()
@@ -246,7 +246,7 @@ def strip_source_metadata(value: str) -> str:
 
 
 def plain_text_to_html(value: str) -> str:
-    text = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    text = clean_schema_text(value)
     if not text:
         return ""
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
@@ -256,6 +256,31 @@ def plain_text_to_html(value: str) -> str:
         escaped = re.sub(r"\n+", "<br>", escaped)
         html_parts.append(f"<p>{escaped}</p>")
     return "".join(html_parts)
+
+
+def clean_schema_text(value: Any) -> str:
+    text = html.unescape(str(value or "")).replace("\xa0", " ")
+    text = re.sub(r"[\u200b\ufeff]", "", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t\f\v]+", " ", text)
+    lines = []
+    seen = set()
+    pending_blank = False
+    for raw_line in text.split("\n"):
+        line = raw_line.strip()
+        if not line:
+            if lines:
+                pending_blank = True
+            continue
+        key = re.sub(r"\W+", " ", line.lower()).strip()
+        if key in seen:
+            continue
+        seen.add(key)
+        if pending_blank and lines and lines[-1] != "":
+            lines.append("")
+        lines.append(line)
+        pending_blank = False
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines).strip())
 
 
 def employment_type_value(value: Any) -> str | list[str] | None:

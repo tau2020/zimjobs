@@ -109,6 +109,23 @@ PURE_HEADING_RE = re.compile(
     re.I,
 )
 
+NOISE_LINE_RE = re.compile(
+    r"^(?:"
+    r"home|menu|jobs?|latest jobs?|all jobs?|browse jobs?|job search|search jobs?|search results|"
+    r"job categories|categories|category\s*:?.*|"
+    r"showing\s+\d+.*|(?:\d+\s+)?jobs?\s+found|sort by|filter by|filters?|"
+    r"load more|read more|view details?|previous|next|back to jobs?|"
+    r"login|register|sign in|candidate login|employer login|"
+    r"privacy policy|terms(?: of use)?|cookie policy|all rights reserved|"
+    r"subscribe.*|newsletter|share(?: on)?(?: facebook| twitter| linkedin| whatsapp)?|copy link|"
+    r"save job|apply now|apply on official site|always apply on the official source.*"
+    r")$",
+    re.I,
+)
+
+INLINE_BULLET_RE = re.compile(r"(?<!^)\s+[•●▪◦‣]\s+")
+BULLET_PREFIX_RE = re.compile(r"^\s*(?:[•●▪◦‣]+|[-*]+)\s+")
+
 
 ROLE_KEYWORDS = (
     "officer", "coordinator", "manager", "assistant", "associate", "analyst", "specialist", "developer",
@@ -259,7 +276,81 @@ def clean_text(value: str | None, max_spaces: bool = True) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     if max_spaces:
         text = re.sub(r"\s+", " ", text)
+    else:
+        text = re.sub(r"[ \t\f\v]+", " ", text)
+        text = "\n".join(line.strip() for line in text.split("\n"))
+        text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip(" \t\r\n-|•")
+
+
+def _clean_job_text_line(line: str) -> str:
+    line = html.unescape(line).replace("\xa0", " ")
+    line = re.sub(r"[\u200b\ufeff]", "", line)
+    line = re.sub(r"[ \t\f\v]+", " ", line).strip()
+    if not line:
+        return ""
+    return BULLET_PREFIX_RE.sub("• ", line)
+
+
+def _is_unrelated_line(line: str) -> bool:
+    cleaned = clean_text(re.sub(r"^[•\-*]\s*", "", line))
+    if not cleaned:
+        return True
+    if cleaned in SITE_CATEGORIES:
+        return True
+    if NOISE_LINE_RE.match(cleaned):
+        return True
+    if re.match(r"^(?:NGO|Government|Private Sector|Remote|Internship)s?\s+Jobs?$", cleaned, re.I):
+        return True
+    return False
+
+
+def normalize_job_text(
+    value: str | None,
+    *,
+    max_chars: int | None = None,
+    remove_duplicate_lines: bool = True,
+    remove_noise: bool = True,
+) -> str:
+    """Normalize scraped multiline job text without preserving source-page spacing.
+
+    This keeps one blank line at most, normalizes bullets, removes common listing
+    page chrome, and drops repeated lines caused by cards/headers being scraped
+    more than once.
+    """
+    if not value:
+        return ""
+    text = html.unescape(str(value)).replace("\xa0", " ")
+    text = re.sub(r"[\u200b\ufeff]", "", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = INLINE_BULLET_RE.sub("\n• ", text)
+    text = re.sub(r"[ \t\f\v]+", " ", text)
+
+    lines: list[str] = []
+    seen: set[str] = set()
+    pending_blank = False
+    for raw_line in text.split("\n"):
+        line = _clean_job_text_line(raw_line)
+        if not line:
+            if lines:
+                pending_blank = True
+            continue
+        if remove_noise and _is_unrelated_line(line):
+            continue
+        key = re.sub(r"\W+", " ", line.lower()).strip()
+        if remove_duplicate_lines and key and key in seen:
+            continue
+        seen.add(key)
+        if pending_blank and lines and lines[-1] != "":
+            lines.append("")
+        lines.append(line)
+        pending_blank = False
+
+    text = "\n".join(lines).strip()
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    if max_chars and len(text) > max_chars:
+        text = text[:max_chars].rsplit(" ", 1)[0].rstrip(".,;:-")
+    return text
 
 
 def clean_html_to_markdownish(value: str | None) -> str:
@@ -268,19 +359,24 @@ def clean_html_to_markdownish(value: str | None) -> str:
     soup = BeautifulSoup(value, "html.parser")
     for bad in soup(["script", "style", "noscript", "svg", "form", "iframe"]):
         bad.decompose()
+    for hidden in soup.find_all(attrs={"hidden": True}):
+        hidden.decompose()
+    for node in soup.find_all(attrs={"aria-hidden": "true"}):
+        node.decompose()
+    for node in soup.find_all(style=True):
+        if re.search(r"display\s*:\s*none|visibility\s*:\s*hidden", node.get("style", ""), re.I):
+            node.decompose()
     for br in soup.find_all("br"):
         br.replace_with("\n")
     for li in soup.find_all("li"):
         li.insert_before("\n• ")
+        li.insert_after("\n")
     for heading in soup.find_all(re.compile("^h[1-6]$")):
         heading.insert_before("\n\n")
         heading.insert_after("\n")
-    for p in soup.find_all("p"):
-        p.insert_after("\n")
-    text = soup.get_text(" ")
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return clean_text(text, max_spaces=False)
+    for block in soup.find_all(["p", "div", "section", "article", "tr"]):
+        block.insert_after("\n")
+    return normalize_job_text(soup.get_text("\n"))
 
 
 def normalize_url(url: str | None, base_url: str | None = None) -> str:
@@ -595,7 +691,7 @@ def _clean_summary_lines(text: str, title: str = "") -> list[str]:
 
 
 def make_summary(title: str, description: str, max_chars: int = 700) -> str:
-    text = clean_text(description, max_spaces=False)
+    text = normalize_job_text(description)
     if not text:
         return title
     boilerplate_patterns = [
@@ -606,7 +702,7 @@ def make_summary(title: str, description: str, max_chars: int = 700) -> str:
     ]
     for pattern in boilerplate_patterns:
         text = re.sub(pattern, "", text, flags=re.I | re.S)
-    lines = _clean_summary_lines(text, title=title)
+    lines = _clean_summary_lines(normalize_job_text(text), title=title)
     if not lines:
         return clean_job_title(title)
 
@@ -624,11 +720,60 @@ def make_summary(title: str, description: str, max_chars: int = 700) -> str:
     if not selected:
         selected = lines[:8]
 
-    summary = "\n".join(selected).strip()
-    summary = re.sub(r"\n{3,}", "\n\n", summary)
+    summary = normalize_job_text("\n".join(selected).strip())
     if len(summary) <= max_chars:
         return summary
     return summary[:max_chars].rsplit(" ", 1)[0].rstrip(".,; ") + "…"
+
+
+def repeated_labeled_values(text: str | None, labels: Iterable[str]) -> dict[str, set[str]]:
+    body = normalize_job_text(text)
+    repeated: dict[str, set[str]] = {}
+    for label in labels:
+        pattern = rf"(?im)^\s*(?:[•\-*]\s*)?{re.escape(label)}\s*:?\s*([^\n]{{2,140}})"
+        values = {
+            re.sub(r"\W+", " ", clean_text(match.group(1)).lower()).strip()
+            for match in re.finditer(pattern, body)
+            if clean_text(match.group(1))
+        }
+        values.discard("")
+        if len(values) > 1:
+            repeated[label] = values
+    return repeated
+
+
+def is_probable_merged_job_text(title: str | None, text: str | None) -> bool:
+    body = normalize_job_text(text)
+    if not body:
+        return False
+    if len(body) > 12000:
+        return True
+    if repeated_labeled_values(
+        body,
+        ["Job Title", "Position Title", "Position", "Role Title", "Role", "Vacancy", "Post"],
+    ):
+        return True
+
+    title_key = re.sub(r"\W+", " ", clean_text(title).lower()).strip()
+    role_lines: set[str] = set()
+    category_or_listing_lines = 0
+    for raw_line in body.splitlines():
+        line = clean_text(re.sub(r"^[•\-*]\s*", "", raw_line))
+        if not line:
+            continue
+        if _is_unrelated_line(line) or re.search(r"\b(?:jobs found|showing|filter by|sort by|latest jobs)\b", line, re.I):
+            category_or_listing_lines += 1
+            continue
+        if len(line) > 140 or re.search(r"\b(?:deadline|closing date|apply by|salary|source)\b", line, re.I):
+            continue
+        if looks_like_real_role(line):
+            key = re.sub(r"\W+", " ", line.lower()).strip()
+            if key and key != title_key:
+                role_lines.add(key)
+
+    if len(role_lines) >= 3:
+        return True
+    return category_or_listing_lines >= 3 and len(role_lines) >= 2
 
 
 def content_hash(values: Iterable[str | None]) -> str:
