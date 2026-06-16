@@ -1,5 +1,6 @@
-import asyncio, json, logging, os, re, sqlite3, sys, threading, time
-from datetime import datetime, timezone
+import asyncio, hmac, json, logging, os, re, sqlite3, sys, threading, time
+from collections import deque
+from datetime import datetime, timedelta, timezone
 from math import ceil
 from traceback import format_exception
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -8,6 +9,7 @@ from flask import (Flask, g, request, render_template, abort,
                    Response, redirect, url_for, has_request_context)
 from flask_compress import Compress
 from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from job_schema import build_job_posting_json_ld
 
@@ -41,6 +43,16 @@ DB_PATH     = os.environ.get("DB_PATH", "/data/jobs.db")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "change-me")
 SITE_URL    = os.environ.get("SITE_URL", "http://localhost:8000").rstrip("/")
 PER_PAGE    = 20
+IS_PRODUCTION = (
+    os.environ.get("FLASK_ENV") == "production"
+    or os.environ.get("APP_ENV") == "production"
+    or bool(os.environ.get("RAILWAY_ENVIRONMENT"))
+)
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if IS_PRODUCTION and not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY must be set in production.")
+if IS_PRODUCTION and ADMIN_TOKEN == "change-me":
+    raise RuntimeError("ADMIN_TOKEN must be set to a non-default value in production.")
 SITE_CONFIG = {
     "site_name": "ZimJobs Hub",
     "default_country_code": "ZW",
@@ -79,9 +91,47 @@ SORT_OPTIONS = {
 
 SIMILAR_LIMIT = 4
 CLOSED_TAG = "closed"
+MAX_TEXT_LENGTHS = {
+    "q": 80,
+    "loc": 80,
+    "title": 140,
+    "company": 120,
+    "location": 120,
+    "category": 40,
+    "summary": 2000,
+    "apply_url": 2048,
+    "employment_type": 40,
+    "salary_range": 160,
+    "remote_status": 40,
+    "experience_level": 40,
+    "expires_at": 10,
+    "posted_at": 32,
+    "department": 120,
+    "job_description": 12000,
+    "requirements": 4000,
+    "tags": 300,
+}
+ENUM_FIELDS = {
+    "category": set(CATEGORIES),
+    "employment_type": set(EMPLOYMENT_TYPES),
+    "remote_status": set(REMOTE_OPTIONS),
+    "experience_level": set(EXPERIENCE_LEVELS),
+}
 
 app = Flask(__name__)
-app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 604800   # 7-day static cache
+app.config.update(
+    SECRET_KEY=SECRET_KEY or (
+        ADMIN_TOKEN if ADMIN_TOKEN != "change-me" else "dev-secret-change-me"
+    ),
+    SEND_FILE_MAX_AGE_DEFAULT=604800,   # 7-day static cache
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=IS_PRODUCTION or SITE_URL.startswith("https://"),
+    PERMANENT_SESSION_LIFETIME=timedelta(days=14),
+    MAX_CONTENT_LENGTH=int(os.environ.get("MAX_CONTENT_LENGTH", str(1024 * 1024))),
+)
+if os.environ.get("TRUST_PROXY_HEADERS") == "1":
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 Compress(app)                                       # gzip/brotli all responses
 
 SENSITIVE_KEYS = (
@@ -169,6 +219,78 @@ def log_event(level, event, **fields):
     log.log(level, "%s %s", event, json.dumps(fields, default=str, sort_keys=True))
 
 
+RATE_LIMIT_BUCKETS: dict[str, deque[float]] = {}
+RATE_LIMIT_RULES = {
+    "login": (10, 10 * 60),
+    "register": (10, 60 * 60),
+    "post_job": (20, 60 * 60),
+    "search": (120, 60),
+}
+
+
+def client_ip():
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if os.environ.get("TRUST_PROXY_HEADERS") == "1" and forwarded:
+        return forwarded.split(",", 1)[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def check_rate_limit(scope, limit, window_seconds):
+    now = time.time()
+    key = f"{scope}:{client_ip()}"
+    bucket = RATE_LIMIT_BUCKETS.setdefault(key, deque())
+    while bucket and bucket[0] <= now - window_seconds:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        log_event(
+            logging.WARNING,
+            "rate_limit_blocked",
+            scope=scope,
+            limit=limit,
+            window_seconds=window_seconds,
+            request=request_context_snapshot(),
+        )
+        abort(429)
+    bucket.append(now)
+
+
+def enforce_route_rate_limit():
+    if os.environ.get("RATE_LIMITS_ENABLED", "1") == "0":
+        return
+    endpoint = request.endpoint or ""
+    rule = None
+    if endpoint == "auth.login" and request.method == "POST":
+        rule = ("login", *RATE_LIMIT_RULES["login"])
+    elif endpoint == "auth.register" and request.method == "POST":
+        rule = ("register", *RATE_LIMIT_RULES["register"])
+    elif endpoint == "post" and request.method == "POST":
+        rule = ("post_job", *RATE_LIMIT_RULES["post_job"])
+    elif endpoint == "index" and request.args.get("q"):
+        rule = ("search", *RATE_LIMIT_RULES["search"])
+    if rule:
+        check_rate_limit(*rule)
+
+
+def security_csp():
+    directives = [
+        "default-src 'self'",
+        "base-uri 'self'",
+        "object-src 'none'",
+        "frame-ancestors 'none'",
+        "form-action 'self'",
+        "img-src 'self' data: https:",
+        "font-src 'self' data:",
+        "style-src 'self' 'unsafe-inline'",
+        "script-src 'self' 'unsafe-inline'",
+        "connect-src 'self'",
+        "manifest-src 'self'",
+        "worker-src 'self'",
+    ]
+    if SITE_URL.startswith("https://"):
+        directives.append("upgrade-insecure-requests")
+    return "; ".join(directives)
+
+
 def _global_exception_hook(exc_type, exc, tb):
     log.critical(
         "uncaught_exception %s",
@@ -214,6 +336,25 @@ except RuntimeError:
 @app.before_request
 def start_request_timer():
     g.request_started_at = time.perf_counter()
+    enforce_route_rate_limit()
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("Content-Security-Policy", security_csp())
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    )
+    if request.is_secure or SITE_URL.startswith("https://"):
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains",
+        )
+    return response
 
 
 @app.after_request
@@ -399,6 +540,111 @@ def fts_match(q):
     return " ".join(f'"{t}"*' for t in tokens)
 
 
+def clean_control_chars(value):
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", " ", str(value or ""))
+
+
+def limited_arg(name, default="", max_chars=80):
+    value = clean_control_chars(request.args.get(name, default)).strip()
+    if len(value) > max_chars:
+        log_event(
+            logging.WARNING,
+            "invalid_input",
+            field=name,
+            reason="too_long",
+            max_chars=max_chars,
+            request=request_context_snapshot(),
+        )
+        abort(400)
+    return value
+
+
+def page_arg(name="page"):
+    raw = request.args.get(name, "1")
+    try:
+        page = int(raw or 1)
+    except (TypeError, ValueError):
+        log_event(
+            logging.WARNING,
+            "invalid_input",
+            field=name,
+            reason="not_integer",
+            request=request_context_snapshot(),
+        )
+        abort(400)
+    if page < 1 or page > 1000:
+        log_event(
+            logging.WARNING,
+            "invalid_input",
+            field=name,
+            reason="out_of_range",
+            request=request_context_snapshot(),
+        )
+        abort(400)
+    return page
+
+
+def require_allowed_value(field, value, allowed):
+    if value and value not in allowed:
+        log_event(
+            logging.WARNING,
+            "invalid_input",
+            field=field,
+            reason="invalid_choice",
+            request=request_context_snapshot(),
+        )
+        abort(400)
+    return value
+
+
+def safe_redirect_target(target, fallback):
+    target = (target or "").strip()
+    parts = urlsplit(target)
+    if not target.startswith("/") or target.startswith("//") or parts.scheme or parts.netloc:
+        return fallback
+    return target
+
+
+def is_safe_public_url(url):
+    url = clean_control_chars(url).strip()
+    if not url or len(url) > MAX_TEXT_LENGTHS["apply_url"]:
+        return False
+    parts = urlsplit(url)
+    return parts.scheme in {"http", "https"} and bool(parts.netloc)
+
+
+def valid_admin_token(value):
+    return bool(value) and hmac.compare_digest(str(value), ADMIN_TOKEN)
+
+
+@app.template_filter("safe_external_url")
+def safe_external_url(url):
+    url = clean_control_chars(url).strip()
+    return url if is_safe_public_url(url) else ""
+
+
+def validate_job_values(values, required_fields):
+    for field in required_fields:
+        if not values.get(field):
+            return "All fields are required."
+    for field, value in values.items():
+        if value is None:
+            continue
+        max_chars = MAX_TEXT_LENGTHS.get(field)
+        if max_chars and len(value) > max_chars:
+            return f"{field.replace('_', ' ').title()} is too long."
+    for field, allowed in ENUM_FIELDS.items():
+        if values.get(field) and values[field] not in allowed:
+            return f"Invalid {field.replace('_', ' ')}."
+    if values.get("apply_url") and not is_safe_public_url(values["apply_url"]):
+        return "Apply URL must be a valid http or https URL."
+    for date_field in ("expires_at", "posted_at"):
+        value = values.get(date_field)
+        if value and not re.match(r"^\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2})?$", value):
+            return f"Invalid {date_field.replace('_', ' ')}."
+    return None
+
+
 def job_columns(db=None):
     db = db or get_db()
     return db_columns(db)
@@ -421,7 +667,7 @@ def clean_job_display_text(value, max_chars=12000):
 
 
 def clean_inline_job_text(value):
-    return re.sub(r"\s+", " ", str(value or "")).strip()
+    return re.sub(r"\s+", " ", clean_control_chars(value)).strip()
 
 
 def clean_job_form_value(field, value):
@@ -649,16 +895,16 @@ def deadline(ts):
 # ------------------------------ routes ------------------------------
 @app.route("/")
 def index():
-    q     = request.args.get("q", "").strip()
-    cat   = request.args.get("cat", "").strip()
-    jtype = request.args.get("type", "").strip()
-    work  = request.args.get("remote", "").strip()
-    exp   = request.args.get("exp", "").strip()
-    loc   = request.args.get("loc", "").strip()
-    sort  = request.args.get("sort", "").strip()
+    q     = limited_arg("q", max_chars=MAX_TEXT_LENGTHS["q"])
+    cat   = require_allowed_value("cat", limited_arg("cat", max_chars=MAX_TEXT_LENGTHS["category"]), CATEGORIES)
+    jtype = require_allowed_value("type", limited_arg("type", max_chars=MAX_TEXT_LENGTHS["employment_type"]), EMPLOYMENT_TYPES)
+    work  = require_allowed_value("remote", limited_arg("remote", max_chars=MAX_TEXT_LENGTHS["remote_status"]), REMOTE_OPTIONS)
+    exp   = require_allowed_value("exp", limited_arg("exp", max_chars=MAX_TEXT_LENGTHS["experience_level"]), EXPERIENCE_LEVELS)
+    loc   = limited_arg("loc", max_chars=MAX_TEXT_LENGTHS["loc"])
+    sort  = limited_arg("sort", max_chars=20)
     if sort not in SORT_OPTIONS:
         sort = "featured"
-    page  = max(int(request.args.get("page", 1) or 1), 1)
+    page  = page_arg()
     db    = get_db()
     cols  = job_columns(db)
 
@@ -728,6 +974,8 @@ def index():
 @app.route("/job/<int:job_id>")
 @app.route("/job/<int:job_id>/<s>")
 def job(job_id, s=None):
+    if s and (len(s) > 160 or not re.match(r"^[A-Za-z0-9_-]+$", s)):
+        abort(400)
     db  = get_db()
     row = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
     if not row or is_closed_job(row) or row_looks_accidentally_merged(row):
@@ -751,19 +999,26 @@ def post():
     """Form for you/recruiters + token-protected API for your scraper."""
     error = None
     if request.method == "POST":
+        if not valid_admin_token(request.headers.get("X-Admin-Token")):
+            from auth import check_csrf
+            check_csrf()
         f = request.form
         core = ("title", "company", "location", "category",
                 "summary", "apply_url")
         cleaned_core = clean_core_job_values(f, core)
-        if f.get("token") != ADMIN_TOKEN:
+        db   = get_db()
+        opt  = optional_job_values(f, job_columns(db))
+        cleaned_values = {**cleaned_core, **opt}
+        validation_error = validate_job_values(cleaned_values, core)
+        if not valid_admin_token(f.get("token") or request.headers.get("X-Admin-Token")):
             error = "Invalid admin token."
-        elif not all(cleaned_core.get(k) for k in core):
-            error = "All fields are required."
+            log_event(logging.WARNING, "invalid_admin_token", request=request_context_snapshot())
+        elif validation_error:
+            error = validation_error
+            log_event(logging.WARNING, "invalid_job_post", reason=validation_error, request=request_context_snapshot())
         elif form_values_are_closed(f):
             error = "Closed or expired jobs are not published."
         else:
-            db   = get_db()
-            opt  = optional_job_values(f, job_columns(db))
             cols = list(core) + ["featured"] + list(opt.keys())
             vals = [cleaned_core[k] for k in core] + \
                    [1 if f.get("featured") else 0] + list(opt.values())
@@ -858,6 +1113,37 @@ def not_found(_):
                            cat=None, q=""), 404
 
 
+def error_page(status_code, title, message):
+    return render_template(
+        "error.html",
+        title=title,
+        message=message,
+        categories=CATEGORIES,
+        cat=None,
+        q="",
+    ), status_code
+
+
+@app.errorhandler(400)
+def bad_request(_):
+    return error_page(400, "Bad request", "The request could not be processed.")
+
+
+@app.errorhandler(403)
+def forbidden(_):
+    return error_page(403, "Forbidden", "You do not have permission to access this page.")
+
+
+@app.errorhandler(429)
+def too_many_requests(_):
+    return error_page(429, "Too many requests", "Please wait a moment and try again.")
+
+
+@app.errorhandler(500)
+def internal_error(_):
+    return error_page(500, "Server error", "Something went wrong. Please try again later.")
+
+
 @app.errorhandler(Exception)
 def handle_unexpected_error(error):
     if isinstance(error, HTTPException):
@@ -869,7 +1155,11 @@ def handle_unexpected_error(error):
                 request=request_context_snapshot(),
                 config=runtime_config_snapshot(),
             )
-        return error
+        return error_page(
+            error.code or 500,
+            error.name or "Request error",
+            "The request could not be processed.",
+        )
 
     log_event(
         logging.ERROR,
@@ -878,7 +1168,7 @@ def handle_unexpected_error(error):
         request=request_context_snapshot(),
         config=runtime_config_snapshot(),
     )
-    return "Internal Server Error", 500
+    return error_page(500, "Server error", "Something went wrong. Please try again later.")
 
 
 log_event(logging.INFO, "app_starting", config=runtime_config_snapshot())
@@ -895,9 +1185,6 @@ except Exception as exc:
     raise
 
 # ---------------------- user & admin modules ------------------------
-import os as _os
-app.secret_key = _os.environ.get("SECRET_KEY") or ADMIN_TOKEN
-
 from auth import auth_bp, init_auth_db   # noqa: E402
 from admin import admin_bp               # noqa: E402
 
@@ -916,4 +1203,8 @@ except Exception as exc:
     raise
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), debug=True)
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", "8000")),
+        debug=os.environ.get("FLASK_DEBUG") == "1",
+    )

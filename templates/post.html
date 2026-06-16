@@ -5,6 +5,7 @@
   <h1>Post a Job</h1>
   {% if error %}<p class="err">{{ error }}</p>{% endif %}
   <form method="post" class="form">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <label>Job title <input name="title" required></label>
     <label>Company <input name="company" required></label>
     <label>Location <input name="location" required placeholder="e.g. Harare or Remote"></label>

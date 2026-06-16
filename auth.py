@@ -1,10 +1,12 @@
-import os, re, secrets, sqlite3
+import hashlib, logging, os, re, secrets, sqlite3
 from functools import wraps
 from flask import (Blueprint, g, request, render_template, redirect,
                    url_for, session, abort, flash)
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from app import get_db, DB_PATH, ADMIN_TOKEN, CATEGORIES
+from app import (get_db, DB_PATH, ADMIN_TOKEN, CATEGORIES,
+                 safe_redirect_target, clean_control_chars, log_event,
+                 request_context_snapshot)
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -75,7 +77,10 @@ def csrf_token():
 
 
 def check_csrf():
-    if request.form.get("_csrf") != session.get("_csrf"):
+    sent = request.form.get("_csrf") or request.headers.get("X-CSRF-Token") or ""
+    expected = session.get("_csrf") or ""
+    if not expected or not secrets.compare_digest(sent, expected):
+        log_event(logging.WARNING, "csrf_blocked", request=request_context_snapshot())
         abort(400)
 
 
@@ -110,7 +115,11 @@ def is_saved(job_id):
 
 
 def _safe_next(nxt):
-    return nxt if nxt.startswith("/") and not nxt.startswith("//") else ""
+    return safe_redirect_target(nxt, "")
+
+
+def _email_hash(email):
+    return hashlib.sha256(email.encode("utf-8")).hexdigest()[:12] if email else ""
 
 
 # ------------------------------ routes ------------------------------
@@ -122,11 +131,13 @@ def register():
     if request.method == "POST":
         check_csrf()
         f = request.form
-        name  = f.get("name", "").strip()
-        email = f.get("email", "").strip().lower()
+        name  = clean_control_chars(f.get("name", "")).strip()
+        email = clean_control_chars(f.get("email", "")).strip().lower()
         pw    = f.get("password", "")
         if not name or not email or not pw:
             error = "All fields are required."
+        elif len(name) > 120 or len(email) > 254 or len(pw) > 256:
+            error = "One or more fields are too long."
         elif not EMAIL_RE.match(email):
             error = "Enter a valid email address."
         elif len(pw) < 8:
@@ -138,6 +149,8 @@ def register():
                     "INSERT INTO users(email,name,password_hash) VALUES(?,?,?)",
                     (email, name, generate_password_hash(pw)))
                 db.commit()
+                session.clear()
+                session.permanent = True
                 session["uid"] = cur.lastrowid
                 flash("Welcome to ZimJobs Hub!")
                 return redirect(url_for("auth.account"))
@@ -156,15 +169,24 @@ def login():
     if request.method == "POST":
         check_csrf()
         f = request.form
+        email = clean_control_chars(f.get("email", "")).strip().lower()
         row = get_db().execute(
             "SELECT * FROM users WHERE email=?",
-            (f.get("email", "").strip().lower(),)).fetchone()
+            (email,)).fetchone()
         if not row or not check_password_hash(row["password_hash"],
                                               f.get("password", "")):
             error = "Invalid email or password."
+            log_event(
+                logging.WARNING,
+                "login_failed",
+                email_hash=_email_hash(email),
+                request=request_context_snapshot(),
+            )
         elif not row["is_active"]:
             error = "This account has been deactivated."
         else:
+            session.clear()
+            session.permanent = True
             session["uid"] = row["id"]
             if nxt:
                 return redirect(nxt)
@@ -200,9 +222,9 @@ def account():
 def account_update():
     check_csrf()
     f = request.form
-    name  = f.get("name", "").strip()
-    email = f.get("email", "").strip().lower()
-    if not name or not EMAIL_RE.match(email):
+    name  = clean_control_chars(f.get("name", "")).strip()
+    email = clean_control_chars(f.get("email", "")).strip().lower()
+    if not name or len(name) > 120 or len(email) > 254 or not EMAIL_RE.match(email):
         flash("Enter a valid name and email address.")
     else:
         try:
@@ -225,6 +247,8 @@ def account_password():
         flash("Current password is incorrect.")
     elif len(f.get("new", "")) < 8:
         flash("New password must be at least 8 characters.")
+    elif len(f.get("new", "")) > 256:
+        flash("New password is too long.")
     else:
         db = get_db()
         db.execute("UPDATE users SET password_hash=? WHERE id=?",
@@ -244,7 +268,7 @@ def save_job(job_id):
     db.execute("INSERT OR IGNORE INTO saved_jobs(user_id,job_id) VALUES(?,?)",
                (g.user["id"], job_id))
     db.commit()
-    return redirect(request.referrer or url_for("job", job_id=job_id))
+    return redirect(safe_redirect_target(request.referrer, url_for("job", job_id=job_id)))
 
 
 @auth_bp.route("/job/<int:job_id>/unsave", methods=["POST"])
@@ -255,4 +279,4 @@ def unsave_job(job_id):
     db.execute("DELETE FROM saved_jobs WHERE user_id=? AND job_id=?",
                (g.user["id"], job_id))
     db.commit()
-    return redirect(request.referrer or url_for("job", job_id=job_id))
+    return redirect(safe_redirect_target(request.referrer, url_for("job", job_id=job_id)))

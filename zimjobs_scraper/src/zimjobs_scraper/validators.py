@@ -34,6 +34,23 @@ REMOTE_ALLOWED_RE = re.compile(
     re.I,
 )
 
+FIELD_MAX_LENGTHS = {
+    "title": 140,
+    "company": 120,
+    "location": 120,
+    "category": 40,
+    "summary": 1100,
+    "apply_url": 2048,
+    "source_url": 2048,
+    "department": 120,
+    "employment_type": 40,
+    "salary_range": 160,
+    "remote_status": 40,
+    "requirements": 1800,
+    "job_description": 12000,
+    "external_job_id": 160,
+}
+
 
 class JobValidator:
     def __init__(self, skip_expired: bool = True, allowed_locations: list[str] | None = None):
@@ -42,6 +59,10 @@ class JobValidator:
 
     def validate(self, job: JobRecord) -> ValidationResult:
         reasons: list[str] = []
+        for field, max_chars in FIELD_MAX_LENGTHS.items():
+            value = getattr(job, field, None)
+            if value and len(str(value)) > max_chars:
+                reasons.append(f"{field}_too_long")
         if not job.title or len(job.title) < 5:
             reasons.append("title_too_short")
         if len(job.title) > 120 or re.search(r"\|\s*(apply by|deadline|closing date|earn|salary)", job.title, re.I):

@@ -382,9 +382,12 @@ def clean_html_to_markdownish(value: str | None) -> str:
 def normalize_url(url: str | None, base_url: str | None = None) -> str:
     if not url:
         return ""
-    absolute = urljoin(base_url or "", url.strip())
+    cleaned = re.sub(r"[\x00-\x20\x7f]+", "", str(url).strip())
+    if not cleaned or len(cleaned) > 2048:
+        return ""
+    absolute = urljoin(base_url or "", cleaned)
     parsed = urlparse(absolute)
-    if parsed.scheme not in {"http", "https"}:
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return ""
     return absolute.split("#", 1)[0].strip()
 

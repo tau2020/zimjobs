@@ -5,7 +5,10 @@ from flask import (Blueprint, g, request, render_template, redirect,
 from app import (get_db, CATEGORIES, PER_PAGE, EMPLOYMENT_TYPES,
                  REMOTE_OPTIONS, EXPERIENCE_LEVELS, job_columns,
                  optional_job_values, form_values_are_closed,
-                 clean_core_job_values)
+                 clean_core_job_values, limited_arg, page_arg,
+                 validate_job_values, safe_redirect_target,
+                 request_context_snapshot, log_event)
+import logging
 from auth import admin_required, check_csrf
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -40,8 +43,8 @@ def dashboard():
 @admin_bp.route("/jobs")
 @admin_required
 def jobs():
-    q    = request.args.get("q", "").strip()
-    page = max(int(request.args.get("page", 1) or 1), 1)
+    q    = limited_arg("q", max_chars=80)
+    page = page_arg()
     db   = get_db()
     base, args = "FROM jobs WHERE 1=1", []
     if q:
@@ -71,14 +74,17 @@ def job_form(job_id=None):
         fields = ("title", "company", "location", "category",
                   "summary", "apply_url")
         cleaned_core = clean_core_job_values(f, fields)
-        if not all(cleaned_core.get(k) for k in fields):
-            error = "All fields are required."
+        opt = optional_job_values(f, job_columns(db))
+        cleaned_values = {**cleaned_core, **opt}
+        validation_error = validate_job_values(cleaned_values, fields)
+        if validation_error:
+            error = validation_error
             job = dict(f)
+            log_event(logging.WARNING, "invalid_admin_job_form", reason=validation_error, request=request_context_snapshot())
         elif form_values_are_closed(f):
             error = "Closed or expired jobs are not saved."
             job = dict(f)
         else:
-            opt = optional_job_values(f, job_columns(db))
             if job_id:
                 set_cols = list(fields) + ["featured"] + list(opt.keys())
                 vals = [cleaned_core[k] for k in fields] + \
@@ -117,7 +123,7 @@ def job_feature(job_id):
                (0 if row["featured"] else 1, job_id))
     db.commit()
     flash("Job updated.")
-    return redirect(request.referrer or url_for("admin.jobs"))
+    return redirect(safe_redirect_target(request.referrer, url_for("admin.jobs")))
 
 
 @admin_bp.route("/jobs/<int:job_id>/delete", methods=["POST"])
@@ -136,8 +142,8 @@ def job_delete(job_id):
 @admin_bp.route("/users")
 @admin_required
 def users():
-    q    = request.args.get("q", "").strip()
-    page = max(int(request.args.get("page", 1) or 1), 1)
+    q    = limited_arg("q", max_chars=80)
+    page = page_arg()
     db   = get_db()
     base, args = "FROM users WHERE 1=1", []
     if q:
@@ -168,7 +174,7 @@ def user_toggle_active(user_id):
                (0 if row["is_active"] else 1, user_id))
     db.commit()
     flash("User updated.")
-    return redirect(request.referrer or url_for("admin.users"))
+    return redirect(safe_redirect_target(request.referrer, url_for("admin.users")))
 
 
 @admin_bp.route("/users/<int:user_id>/toggle-role", methods=["POST"])
@@ -187,7 +193,7 @@ def user_toggle_role(user_id):
                ("user" if row["role"] == "admin" else "admin", user_id))
     db.commit()
     flash("User updated.")
-    return redirect(request.referrer or url_for("admin.users"))
+    return redirect(safe_redirect_target(request.referrer, url_for("admin.users")))
 
 
 @admin_bp.route("/users/<int:user_id>/delete", methods=["POST"])

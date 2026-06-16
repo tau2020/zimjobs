@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} | ZimJobs Hub{% endblock %}
+{% block content %}
+<article class="card detail">
+  <h1>{{ title }}</h1>
+  <p>{{ message }}</p>
+  <p><a class="btn" href="/">Browse jobs</a></p>
+</article>
+{% endblock %}
