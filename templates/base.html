@@ -34,8 +34,6 @@
 <main>{% block content %}{% endblock %}</main>
 
 <footer>
-  <a class="wa" href="https://whatsapp.com/channel/YOUR_CHANNEL_ID">
-    📲 Join our free WhatsApp jobs channel</a>
   <p><a href="/services">CV Writing</a> · <a href="/post">Post a Job</a> ·
      <a href="/feed.xml">RSS</a>{% if current_user %} · <a href="/account">My Account</a>{% if current_user['role'] == 'admin' %} · <a href="/admin/">Admin</a>{% endif %}{% else %} · <a href="/login">Login</a> · <a href="/register">Register</a>{% endif %}</p>
   <p>© ZimJobs Hub — jobs in Zimbabwe &amp; remote work for Zimbabweans.</p>
