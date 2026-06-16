@@ -5,18 +5,11 @@
 {% block head %}
 <meta property="og:title" content="{{ job['title'] }} — {{ job['company'] }}">
 <meta property="og:description" content="{{ job['summary'][:150] }}">
+{% if job_json_ld %}
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"JobPosting",
- "title":{{ job['title']|tojson }},
- "description":{{ (job['job_description'] or job['summary'])|tojson }},
- "datePosted":"{{ (job['posted_at'] or job['created_at'])[:10] }}",
- {% if job['expires_at'] %}"validThrough":{{ job['expires_at']|tojson }},{% endif %}
- {% if job['employment_type'] %}"employmentType":{{ job['employment_type']|tojson }},{% endif %}
- {% if job['salary_range'] %}"baseSalary":{"@type":"MonetaryAmount","value":{{ job['salary_range']|tojson }}},{% endif %}
- "hiringOrganization":{"@type":"Organization","name":{{ job['company']|tojson }}},
- "jobLocation":{"@type":"Place","address":{{ job['location']|tojson }}},
- "url":{{ url|tojson }}}
+{{ job_json_ld|tojson }}
 </script>
+{% endif %}
 {% endblock %}
 {% block content %}
 <nav class="crumbs" aria-label="Breadcrumb">

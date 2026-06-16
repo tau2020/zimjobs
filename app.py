@@ -9,6 +9,8 @@ from flask import (Flask, g, request, render_template, abort,
 from flask_compress import Compress
 from werkzeug.exceptions import HTTPException
 
+from job_schema import build_job_posting_json_ld
+
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -21,13 +23,17 @@ DB_PATH     = os.environ.get("DB_PATH", "/data/jobs.db")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "change-me")
 SITE_URL    = os.environ.get("SITE_URL", "http://localhost:8000").rstrip("/")
 PER_PAGE    = 20
+SITE_CONFIG = {
+    "site_name": "ZimJobs Hub",
+    "default_country_code": "ZW",
+    "default_remote_applicant_country": "Zimbabwe",
+}
 
 CATEGORIES = ["NGO & Development", "Government", "Private Sector",
               "Remote & International", "Internships", "Gigs"]
 
-# Optional, nullable columns added on top of the original schema. Names mirror
-# the scraper's OPTIONAL_COLUMNS_SQL so scraped metadata lands in real columns
-# instead of being appended to the summary text. All are additive and safe.
+# Optional, nullable columns added on top of the original schema. Names track
+# the web app's supported subset of scraper metadata. All are additive and safe.
 OPTIONAL_JOB_COLUMNS = {
     "employment_type": "TEXT",
     "salary_range":    "TEXT",
@@ -676,7 +682,9 @@ def job(job_id, s=None):
         abort(404)
     url = f"{SITE_URL}/job/{row['id']}/{slug(row['title'])}"
     similar = similar_jobs(db, row)
+    job_json_ld = build_job_posting_json_ld(row, {**SITE_CONFIG, "job_url": url})
     return render_template("job.html", job=row, url=url, similar=similar,
+                           job_json_ld=job_json_ld,
                            categories=CATEGORIES, cat=None, q="")
 
 
