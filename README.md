@@ -25,16 +25,18 @@ To ensure the SQLite database is kept persistent and updated daily, configure yo
      sqlite3 /data/jobs.db "SELECT COUNT(*) FROM jobs;"
      ```
 
-5. **Daily scraper cron**:
+5. **Scraper cron**:
    * The Docker image starts Alpine `crond` beside Gunicorn.
    * The live Flask app and scraper both use `DB_PATH=/data/jobs.db`, so scraped jobs are written to the same persistent SQLite database that the website reads.
    * The default schedule is:
      ```text
-     15 6 * * *
+     15 4,12,20 * * *
      ```
-     This runs daily at 06:15 UTC, which is 08:15 in Africa/Harare.
+     This runs three times per day at 04:15, 12:15, and 20:15 UTC, which is 06:15, 14:15, and 22:15 in Africa/Harare.
    * To change the schedule, set `SCRAPER_CRON_SCHEDULE` on Railway.
    * To disable the cron without changing the image, set `ENABLE_SCRAPER_CRON=0`.
+   * After each scraper run, the maintenance step removes expired jobs and jobs containing known scraped spam/boilerplate description markers such as `Please mention the word`, `beta feature to avoid spam applicants`, and `RMTUyLjU1LjE3Ny44Mw==`.
+   * To disable only the bad-description cleanup without disabling the scraper, set `ENABLE_BAD_DESCRIPTION_CLEANUP=0`.
    * Cron output is appended to `/data/scraper.log`.
 
 ## Transactional Email With Resend
@@ -94,6 +96,7 @@ sqlite3 /data/jobs.db "SELECT COUNT(*) FROM jobs;"
 cd /app/zimjobs_scraper
 PYTHONPATH=src DRY_RUN=0 AUTO_ADD_OPTIONAL_COLUMNS=1 PROGRESS=1 \
 python run_scraper.py --db "${DB_PATH:-/data/jobs.db}" --config config/sources.json
+python -m zimjobs_scraper.clean_db --db "${DB_PATH:-/data/jobs.db}" --yes --bad-descriptions
 sqlite3 /data/jobs.db "SELECT id, title, company, created_at FROM jobs ORDER BY id DESC LIMIT 10;"
 ```
 
@@ -106,3 +109,32 @@ To verify that the database has been successfully updated with the latest scrape
 ```bash
 sqlite3 /data/jobs.db "SELECT id, title, company, category, created_at FROM jobs ORDER BY id DESC LIMIT 10;"
 ```
+
+## Full Jobs Reset and Rescrape
+
+Use this only when you intentionally want to remove every current job and
+rebuild the jobs table from scraper sources. The script takes a timestamped
+SQLite backup first, clears `saved_jobs` references, deletes all `jobs`, rebuilds
+FTS, runs the scraper, then runs the normal post-scrape cleanup.
+
+On Railway:
+
+```bash
+railway ssh 'sh /app/scripts/reset_jobs_and_rerun_scraper.sh --yes'
+```
+
+Local example:
+
+```bash
+DB_PATH=jobs.db SCRAPER_CONFIG=zimjobs_scraper/config/sources.json \
+scripts/reset_jobs_and_rerun_scraper.sh --yes
+```
+
+To test only the delete/rebuild step without running the scraper:
+
+```bash
+scripts/reset_jobs_and_rerun_scraper.sh --yes --db jobs.db --reset-only
+```
+
+Backups are written beside the database by default as
+`jobs-reset-YYYYMMDDTHHMMSSZ.db`. Do not use `--no-backup` in production.

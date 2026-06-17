@@ -3,7 +3,7 @@ set -eu
 
 DB_PATH="${DB_PATH:-/data/jobs.db}"
 ENABLE_SCRAPER_CRON="${ENABLE_SCRAPER_CRON:-1}"
-SCRAPER_CRON_SCHEDULE="${SCRAPER_CRON_SCHEDULE:-15 6 * * *}"
+SCRAPER_CRON_SCHEDULE="${SCRAPER_CRON_SCHEDULE:-15 4,12,20 * * *}"
 
 mkdir -p "$(dirname "$DB_PATH")"
 echo "web startup config: port=${PORT:-8000} db_path=$DB_PATH cron_enabled=$ENABLE_SCRAPER_CRON"

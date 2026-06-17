@@ -54,7 +54,7 @@
   {
     "name": "remoteok_api",
     "type": "remoteok_api",
-    "enabled": true,
+    "enabled": false,
     "start_urls": [
       "https://remoteok.com/api"
     ],
@@ -64,7 +64,7 @@
     "default_category": "Remote & International",
     "allowed_locations": ["Remote", "Worldwide", "Anywhere", "Global", "Africa", "EMEA", "Zimbabwe"],
     "attribution": "Mention Remote OK as source and direct-link to the Remote OK listing URL.",
-    "legal_status": "Public JSON feed; no redirects or application automation.",
+    "legal_status": "Public JSON feed; no redirects or application automation. Disabled because imported RemoteOK listings can include unwanted remoteok.com/remote-jobs entries and application boilerplate.",
     "skip_expired": true
   },
   {

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from zimjobs_scraper.db import SQLiteJobRepository
 from zimjobs_scraper.dedupe import dedupe_in_memory
+from zimjobs_scraper.clean_db import clean_jobs
 from zimjobs_scraper.mapper import map_raw_job
 from zimjobs_scraper.models import RawJob
 from zimjobs_scraper.parsers import SourceConfig
@@ -171,6 +172,177 @@ def test_sqlite_delete_expired_jobs_rebuilds_stale_fts_before_delete(tmp_path: P
 
     assert deleted == 1
     assert remaining == 0
+
+
+def test_sqlite_delete_bad_description_jobs_removes_spam_and_saved_refs(tmp_path: Path):
+    db_path = tmp_path / "jobs.db"
+    repo = SQLiteJobRepository(str(db_path), auto_add_optional_columns=True)
+    repo.conn.execute("CREATE TABLE saved_jobs(user_id INTEGER, job_id INTEGER)")
+    repo.conn.execute(
+        """INSERT INTO jobs(title,company,location,category,summary,apply_url,job_description)
+           VALUES(?,?,?,?,?,?,?)""",
+        (
+            "Venture Capital Investment Analyst",
+            "Remote Company",
+            "Remote",
+            "Private Sector",
+            "Role Overview",
+            "https://example.com/bad",
+            "Please mention the word ADVOCATES and tag RMTUyLjU1LjE3Ny44Mw== when applying to show you read the job post completely.",
+        ),
+    )
+    bad_id = repo.conn.execute("SELECT id FROM jobs WHERE title='Venture Capital Investment Analyst'").fetchone()["id"]
+    repo.conn.execute("INSERT INTO saved_jobs(user_id, job_id) VALUES(?, ?)", (1, bad_id))
+    repo.conn.execute(
+        """INSERT INTO jobs(title,company,location,category,summary,apply_url,job_description)
+           VALUES(?,?,?,?,?,?,?)""",
+        (
+            "Clean Analyst",
+            "Remote Company",
+            "Harare",
+            "Private Sector",
+            "A normal analyst role with enough detail for applicants.",
+            "https://example.com/clean",
+            "Analyze investments and prepare reports for a local portfolio team.",
+        ),
+    )
+    repo.conn.commit()
+
+    deleted = repo.delete_bad_description_jobs()
+    remaining_titles = [r["title"] for r in repo.conn.execute("SELECT title FROM jobs ORDER BY title").fetchall()]
+    saved_count = repo.conn.execute("SELECT COUNT(*) c FROM saved_jobs").fetchone()["c"]
+    repo.close()
+
+    assert deleted == 1
+    assert remaining_titles == ["Clean Analyst"]
+    assert saved_count == 0
+
+
+def test_clean_jobs_bad_description_cleanup_rebuilds_fts(tmp_path: Path):
+    db_path = tmp_path / "jobs.db"
+    repo = SQLiteJobRepository(str(db_path), auto_add_optional_columns=True)
+    repo.conn.execute(
+        """CREATE VIRTUAL TABLE jobs_fts USING fts5(
+           title, company, summary, location,
+           content='jobs', content_rowid='id')"""
+    )
+    repo.conn.execute(
+        """INSERT INTO jobs(title,company,location,category,summary,apply_url,job_description)
+           VALUES(?,?,?,?,?,?,?)""",
+        (
+            "Junior Front-End Developer",
+            "Example Ltd",
+            "Remote",
+            "Remote & International",
+            "Posted 12:31:23 PM. Job Title: Junior Front-End Developer. See this and similar jobs on LinkedIn.",
+            "https://example.com/linkedin",
+            "Please mention the word LUCK and tag RMTUyLjU1LjE3Ny44Mw== when applying.",
+        ),
+    )
+    repo.conn.execute(
+        """INSERT INTO jobs(title,company,location,category,summary,apply_url,job_description)
+           VALUES(?,?,?,?,?,?,?)""",
+        (
+            "Frontend Developer",
+            "Example Ltd",
+            "Harare",
+            "Private Sector",
+            "Build accessible interfaces and maintain a Flask-backed job board.",
+            "https://example.com/frontend",
+            "Build accessible interfaces and maintain a Flask-backed job board.",
+        ),
+    )
+    repo.conn.execute("INSERT INTO jobs_fts(jobs_fts) VALUES('rebuild')")
+    repo.conn.commit()
+    repo.close()
+
+    stats = clean_jobs(str(db_path), bad_descriptions=True)
+    con = sqlite3.connect(db_path)
+    rows = con.execute("SELECT title FROM jobs ORDER BY title").fetchall()
+    fts_rows = con.execute("SELECT COUNT(*) FROM jobs_fts").fetchone()[0]
+    con.close()
+
+    assert stats["bad_description_jobs"] == 1
+    assert stats["deleted"] == 1
+    assert stats["fts_rebuilt"] == 1
+    assert rows == [("Frontend Developer",)]
+    assert fts_rows == 1
+
+
+def test_bad_description_cleanup_is_safe_on_legacy_schema(tmp_path: Path):
+    db_path = tmp_path / "jobs.db"
+    repo = SQLiteJobRepository(str(db_path), auto_add_optional_columns=False)
+    repo.conn.execute(
+        """INSERT INTO jobs(title,company,location,category,summary,apply_url)
+           VALUES(?,?,?,?,?,?)""",
+        (
+            "Legacy Bad Row",
+            "Example Ltd",
+            "Remote",
+            "Private Sector",
+            "Please mention the word ADVOCATES and tag RMTUyLjU1LjE3Ny44Mw== when applying.",
+            "https://example.com/legacy-bad",
+        ),
+    )
+    repo.conn.execute(
+        """INSERT INTO jobs(title,company,location,category,summary,apply_url)
+           VALUES(?,?,?,?,?,?)""",
+        (
+            "Legacy Clean Row",
+            "Example Ltd",
+            "Harare",
+            "Private Sector",
+            "Normal job summary.",
+            "https://example.com/legacy-clean",
+        ),
+    )
+    repo.conn.commit()
+
+    deleted = repo.delete_bad_description_jobs()
+    remaining_titles = [r["title"] for r in repo.conn.execute("SELECT title FROM jobs ORDER BY title").fetchall()]
+    repo.close()
+
+    assert deleted == 1
+    assert remaining_titles == ["Legacy Clean Row"]
+
+
+def test_bad_description_cleanup_removes_remoteok_job_urls(tmp_path: Path):
+    db_path = tmp_path / "jobs.db"
+    repo = SQLiteJobRepository(str(db_path), auto_add_optional_columns=True)
+    repo.conn.execute(
+        """INSERT INTO jobs(title,company,location,category,summary,apply_url,source_url)
+           VALUES(?,?,?,?,?,?,?)""",
+        (
+            "RemoteOK Role",
+            "Example Ltd",
+            "Remote",
+            "Remote & International",
+            "A normal looking summary from a source we no longer want.",
+            "https://remoteok.com/remote-jobs/456-product-manager",
+            "https://remoteok.com/remote-jobs/456-product-manager",
+        ),
+    )
+    repo.conn.execute(
+        """INSERT INTO jobs(title,company,location,category,summary,apply_url,source_url)
+           VALUES(?,?,?,?,?,?,?)""",
+        (
+            "Non RemoteOK Role",
+            "Example Ltd",
+            "Remote",
+            "Remote & International",
+            "A normal looking summary from a retained source.",
+            "https://example.com/remote-jobs/456-product-manager",
+            "https://example.com/remote-jobs/456-product-manager",
+        ),
+    )
+    repo.conn.commit()
+
+    deleted = repo.delete_bad_description_jobs()
+    remaining_urls = [r["apply_url"] for r in repo.conn.execute("SELECT apply_url FROM jobs ORDER BY title").fetchall()]
+    repo.close()
+
+    assert deleted == 1
+    assert remaining_urls == ["https://example.com/remote-jobs/456-product-manager"]
 
 
 

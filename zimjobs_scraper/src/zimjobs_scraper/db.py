@@ -30,6 +30,20 @@ OPTIONAL_COLUMNS_SQL = {
     "scraped_at": "TEXT",
 }
 
+BAD_DESCRIPTION_TEXT_COLUMNS = ("summary", "job_description", "requirements")
+BAD_DESCRIPTION_EXACT_MARKERS = (
+    "RMTUyLjU1LjE3Ny44Mw==",
+)
+BAD_DESCRIPTION_PHRASES = (
+    "please mention the word",
+    "beta feature to avoid spam applicants",
+    "companies can search these words",
+    "see this and similar jobs on linkedin",
+)
+BAD_SOURCE_URL_PREFIXES = (
+    "https://remoteok.com/remote-jobs",
+)
+
 
 class SQLiteJobRepository:
     def __init__(self, db_path: str, table_name: str = "jobs", auto_add_optional_columns: bool | None = None):
@@ -206,6 +220,56 @@ class SQLiteJobRepository:
         self.conn.execute(f"DELETE FROM {self.table_name} WHERE {where}")
         self.conn.commit()
         log.info("db_expired_deleted", extra={"status": count})
+        return count
+
+    def bad_description_where(self) -> tuple[str, list[str]]:
+        available = self.columns()
+        text_columns = [col for col in BAD_DESCRIPTION_TEXT_COLUMNS if col in available]
+        clauses = []
+        args = []
+        if text_columns:
+            text_expr = " || char(10) || ".join(f"coalesce({col}, '')" for col in text_columns)
+            lower_expr = f"lower({text_expr})"
+            for marker in BAD_DESCRIPTION_EXACT_MARKERS:
+                clauses.append(f"instr({text_expr}, ?) > 0")
+                args.append(marker)
+            for phrase in BAD_DESCRIPTION_PHRASES:
+                clauses.append(f"{lower_expr} LIKE ?")
+                args.append(f"%{phrase}%")
+
+        url_columns = [col for col in ("apply_url", "source_url") if col in available]
+        for prefix in BAD_SOURCE_URL_PREFIXES:
+            url_clauses = [f"lower(coalesce({col}, '')) LIKE ?" for col in url_columns]
+            if url_clauses:
+                clauses.append("(" + " OR ".join(url_clauses) + ")")
+                args.extend([f"{prefix.lower()}%"] * len(url_columns))
+
+        if not clauses:
+            return "0", []
+        return "(" + " OR ".join(clauses) + ")", args
+
+    def delete_bad_description_jobs(self, dry_run: bool = False) -> int:
+        where, args = self.bad_description_where()
+        if where == "0":
+            return 0
+
+        row = self.conn.execute(f"SELECT COUNT(*) AS count FROM {self.table_name} WHERE {where}", args).fetchone()
+        count = int(row["count"])
+        if dry_run or count == 0:
+            return count
+
+        saved_exists = self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='saved_jobs'"
+        ).fetchone()
+        if saved_exists:
+            self.conn.execute(
+                f"DELETE FROM saved_jobs WHERE job_id IN "
+                f"(SELECT id FROM {self.table_name} WHERE {where})",
+                args,
+            )
+        self.conn.execute(f"DELETE FROM {self.table_name} WHERE {where}", args)
+        self.conn.commit()
+        log.info("db_bad_description_deleted", extra={"status": count})
         return count
 
     def rebuild_fts_if_present(self) -> bool:
