@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "_card.html" import job_card %}
+{% from "_alert_cta.html" import alert_cta %}
+{% block title %}{{ page['title'] }} | ZimJobs Hub{% endblock %}
+{% block desc %}{{ page['desc'] }}{% endblock %}
+{% block content %}
+<nav class="crumbs" aria-label="Breadcrumb">
+  <a href="/">Jobs</a> <i>›</i>
+  <span>{{ page['h1'] }}</span>
+</nav>
+
+{% include "_flashes.html" %}
+
+<article class="card detail landing-hero">
+  <h1>{{ page['h1'] }}</h1>
+  <p>{{ page['intro'] }}</p>
+  {% if related_pages %}
+  <p class="related-links">
+    {% for related_slug, related in related_pages %}
+    <a href="/jobs/{{ related_slug }}/">{{ related['h1'] }}</a>
+    {% endfor %}
+  </p>
+  {% endif %}
+</article>
+
+{{ alert_cta("landing_" ~ slug_name, page.get("alert_category", ""), page.get("alert_location", ""), "Get alerts for " ~ page['h1']) }}
+
+<p class="meta">{{ jobs|length }} active job{{ '' if jobs|length == 1 else 's' }}</p>
+{% for j in jobs %}{{ job_card(j) }}{% else %}
+<div class="card empty">
+  <p class="empty-icon">🔍</p>
+  <p><b>No current jobs on this page.</b></p>
+  <p>Sign up for alerts and check the latest listings.</p>
+  <p><a class="btn sm" href="/">Browse all jobs</a></p>
+</div>
+{% endfor %}
+{% endblock %}

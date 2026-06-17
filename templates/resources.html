@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_affiliate.html" import affiliate_block %}
+{% block title %}{{ page['title'] }} | ZimJobs Hub{% endblock %}
+{% block desc %}{{ page['desc'] }}{% endblock %}
+{% block content %}
+<nav class="crumbs" aria-label="Breadcrumb">
+  <a href="/">Jobs</a> <i>›</i>
+  <span>{{ page['title'] }}</span>
+</nav>
+
+<article class="card detail resource-hero">
+  <h1>{{ page['title'] }}</h1>
+  <p>{{ page['intro'] }}</p>
+  <p class="affiliate-disclosure wide">{{ disclosure }}</p>
+</article>
+
+<nav class="resource-tabs" aria-label="Resource pages">
+  {% for key, item in pages.items() %}
+  <a class="{{ 'on' if item['title'] == page['title'] }}"
+     href="/resources/{{ key }}">{{ item['title'].replace('Best ', '').replace(' for Job Seekers', '') }}</a>
+  {% endfor %}
+</nav>
+
+{{ affiliate_block(offers, "resource_page", "Recommended resources", "Editorially selected categories matched to this resource page. Replace placeholder links from the admin panel when your affiliate accounts are ready.") }}
+
+<article class="card detail">
+  <h2>How to choose</h2>
+  <ul class="resource-list">
+    <li>Start with the problem closest to your next action: CV, interview, skills, remote-work setup, or hiring workflow.</li>
+    <li>Prefer tools with transparent pricing, cancellation terms, and clear deliverables.</li>
+    <li>Do not pay anyone who promises guaranteed jobs, interview outcomes, or visa approvals.</li>
+  </ul>
+  <p><a class="btn ghost" href="/">Browse current jobs</a>
+     <a class="btn ghost" href="/services">CV writing services</a></p>
+</article>
+{% endblock %}

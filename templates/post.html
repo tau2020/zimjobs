@@ -1,10 +1,15 @@
 {% extends "base.html" %}
+{% from "_affiliate.html" import affiliate_block %}
 {% block title %}Post a Job | ZimJobs Hub{% endblock %}
 {% block content %}
-<article class="card detail">
+<article class="card detail"
+         data-track-view="employer_post_start"
+         data-track-source="post_job">
   <h1>Post a Job</h1>
   {% if error %}<p class="err">{{ error }}</p>{% endif %}
-  <form method="post" class="form">
+  <form method="post" class="form"
+        data-track-event="employer_post_submit"
+        data-track-source="post_job">
     <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <label>Job title <input name="title" required></label>
     <label>Company <input name="company" required></label>
@@ -40,4 +45,5 @@
     <button class="btn" type="submit">Publish job</button>
   </form>
 </article>
+{{ affiliate_block(employer_offers, "post_job", "Tools for managing applicants", "Useful employer tools for applicant tracking, screening, payroll, and onboarding after your role is live.") }}
 {% endblock %}

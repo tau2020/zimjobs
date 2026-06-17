@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_card.html" import job_card %}
+{% from "_affiliate.html" import affiliate_block %}
 {% block title %}My Account | ZimJobs Hub{% endblock %}
 {% block content %}
 <article class="card detail">
@@ -25,6 +26,8 @@
 <div class="card empty"><p>No saved jobs yet.
    <a href="/">Browse jobs</a> and tap “☆ Save job”.</p></div>
 {% endfor %}
+
+{{ affiliate_block(affiliate_offers, "saved_jobs", "Tools for your saved jobs", "Use these resources to prepare applications for the roles you are tracking.") }}
 
 <form method="post" action="/logout" class="inline-form">
   <input type="hidden" name="_csrf" value="{{ csrf_token() }}">

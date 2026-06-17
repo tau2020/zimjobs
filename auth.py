@@ -6,7 +6,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 from app import (get_db, DB_PATH, ADMIN_TOKEN, CATEGORIES,
                  safe_redirect_target, clean_control_chars, log_event,
-                 request_context_snapshot)
+                 request_context_snapshot, select_affiliate_offers)
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -213,7 +213,14 @@ def account():
            WHERE saved_jobs.user_id=?
            ORDER BY saved_jobs.created_at DESC""",
         (g.user["id"],)).fetchall()
+    affiliate_offers = select_affiliate_offers(
+        audience="job_seeker",
+        placement="saved_jobs",
+        category=saved[0]["category"] if saved else "",
+        limit=2,
+    )
     return render_template("account.html", saved=saved,
+                           affiliate_offers=affiliate_offers,
                            categories=CATEGORIES, cat=None, q="")
 
 

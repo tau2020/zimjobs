@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if offer_id else 'New' }} Affiliate Offer | ZimJobs Hub{% endblock %}
+{% block content %}
+{% set active = 'affiliates' %}{% include "admin/_nav.html" %}
+<article class="card detail">
+  <h1>{{ 'Edit' if offer_id else 'New' }} Affiliate Offer</h1>
+  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+  <form method="post" class="form">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <div class="form-grid">
+      <label>Internal name
+        <input name="name" value="{{ offer['name']|default('', true) }}" required>
+      </label>
+      <label>Offer category
+        <input name="offer_category" value="{{ offer['offer_category']|default('', true) }}" placeholder="resume, ats, payroll" required>
+      </label>
+      <label>Audience type
+        <input name="audience_type" value="{{ offer['audience_type']|default('', true) }}" placeholder="job_seeker,employer,recruiter" required>
+      </label>
+      <label>Job category targets
+        <input name="job_category_targets" value="{{ offer['job_category_targets']|default('', true) }}" placeholder="Private Sector,Remote & International or All">
+      </label>
+      <label>Placement locations
+        <input name="placement_locations" value="{{ offer['placement_locations']|default('', true) }}" placeholder="job_detail,resource_page" required>
+      </label>
+      <label>Priority score
+        <input name="priority_score" type="number" value="{{ offer['priority_score']|default(50, true) }}">
+      </label>
+    </div>
+    <label>Affiliate URL
+      <input name="affiliate_url" type="url" value="{{ offer['affiliate_url']|default('', true) }}" required>
+    </label>
+    <label>Display title
+      <input name="display_title" value="{{ offer['display_title']|default('', true) }}" required>
+    </label>
+    <label>Description
+      <textarea name="description" rows="4" required>{{ offer['description']|default('', true) }}</textarea>
+    </label>
+    <div class="form-grid">
+      <label>CTA button text
+        <input name="cta_text" value="{{ offer['cta_text']|default('', true) }}" required>
+      </label>
+      <label>Image/logo URL
+        <input name="image_url" type="url" value="{{ offer['image_url']|default('', true) }}">
+      </label>
+      <label>Tracking ID
+        <input name="tracking_id" value="{{ offer['tracking_id']|default('', true) }}">
+      </label>
+      <label class="chk">
+        <input type="checkbox" name="is_active" value="1"
+               {% if offer['is_active']|default(1, true) %}checked{% endif %}>
+        Active
+      </label>
+    </div>
+    <label>Disclosure text
+      <input name="disclosure_text" value="{{ offer['disclosure_text']|default('', true) }}">
+    </label>
+    <button class="btn" type="submit">Save offer</button>
+    <a class="btn ghost" href="/admin/affiliates">Cancel</a>
+  </form>
+</article>
+{% endblock %}

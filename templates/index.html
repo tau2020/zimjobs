@@ -1,11 +1,18 @@
 {% extends "base.html" %}
 {% from "_card.html" import job_card %}
+{% from "_affiliate.html" import affiliate_block %}
+{% from "_alert_cta.html" import alert_cta %}
 {% block content %}
 
 {% set qs %}q={{ filters.q|urlencode }}&cat={{ filters.cat|urlencode }}&type={{ filters.type|urlencode }}&remote={{ filters.remote|urlencode }}&exp={{ filters.exp|urlencode }}&loc={{ filters.loc|urlencode }}&sort={{ filters.sort|urlencode }}{% endset %}
 
+{% include "_flashes.html" %}
 <p class="meta">{{ total }} job{{ '' if total == 1 else 's' }}
   {%- if cat %} in {{ cat }}{% endif %}{% if q %} matching “{{ q }}”{% endif %}</p>
+
+{% if active_filters and jobs %}
+{{ alert_cta("job_search", filters.cat, filters.loc, "Get alerts for this search") }}
+{% endif %}
 
 {% for j in jobs %}{{ job_card(j) }}{% else %}
 <div class="card empty">
@@ -14,6 +21,8 @@
   <p>Try a different keyword or category.</p>
   <p><a class="btn sm" href="/">Browse all jobs</a></p>
 </div>
+{{ alert_cta("empty_search", filters.cat, filters.loc, "Get alerts when matching jobs appear") }}
+{{ affiliate_block(empty_search_offers, "empty_search", "Useful tools while you search", "Improve your CV, interview prep, or skills while we look for matching roles.") }}
 {% endfor %}
 
 {% if pages > 1 %}

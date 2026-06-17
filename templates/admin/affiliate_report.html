@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Affiliate Report | ZimJobs Hub{% endblock %}
+{% block content %}
+{% set active = 'affiliate_report' %}{% include "admin/_nav.html" %}
+<div class="stats">
+  <div class="card stat"><b>{{ totals['impressions'] or 0 }}</b><span>Total views</span></div>
+  <div class="card stat"><b>{{ totals['clicks'] or 0 }}</b><span>Total clicks</span></div>
+  <div class="card stat">
+    {% set views = totals['impressions'] or 0 %}
+    {% set clicks = totals['clicks'] or 0 %}
+    <b>{{ ((clicks / views) * 100)|round(1) if views else 0 }}%</b><span>CTR</span>
+  </div>
+</div>
+
+<article class="card detail">
+  <h1>Affiliate Report</h1>
+  <h2>Performance by offer</h2>
+  <div class="table-wrap"><table class="table">
+    <tr><th>Offer</th><th>Category</th><th>Views</th><th>Clicks</th><th>CTR</th></tr>
+    {% for row in by_offer %}
+    {% set views = row['impressions'] or 0 %}
+    {% set clicks = row['clicks'] or 0 %}
+    <tr>
+      <td>{{ row['display_title'] }}</td>
+      <td>{{ row['offer_category'] }}</td>
+      <td>{{ views }}</td>
+      <td>{{ clicks }}</td>
+      <td>{{ ((clicks / views) * 100)|round(1) if views else 0 }}%</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</article>
+
+<article class="card detail">
+  <h2>Performance by placement</h2>
+  <div class="table-wrap"><table class="table">
+    <tr><th>Placement</th><th>Views</th><th>Clicks</th><th>CTR</th></tr>
+    {% for row in by_placement %}
+    {% set views = row['impressions'] or 0 %}
+    {% set clicks = row['clicks'] or 0 %}
+    <tr>
+      <td>{{ row['placement_id'] }}</td>
+      <td>{{ views }}</td>
+      <td>{{ clicks }}</td>
+      <td>{{ ((clicks / views) * 100)|round(1) if views else 0 }}%</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</article>
+
+<article class="card detail">
+  <h2>Recent events</h2>
+  <div class="table-wrap"><table class="table">
+    <tr><th>Time</th><th>Event</th><th>Offer</th><th>Placement</th><th>Category</th><th>Device</th></tr>
+    {% for event in recent %}
+    <tr>
+      <td>{{ event['created_at'] }}</td>
+      <td>{{ event['event_type'] }}</td>
+      <td>{{ event['display_title'] }}</td>
+      <td>{{ event['placement_id'] }}</td>
+      <td>{{ event['job_category'] }}</td>
+      <td>{{ event['device_type'] }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</article>
+{% endblock %}

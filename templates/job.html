@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_card.html" import job_card %}
+{% from "_affiliate.html" import affiliate_block %}
 {% block title %}{{ job['title'] }} — {{ job['company'] }} | ZimJobs Hub{% endblock %}
 {% block desc %}{{ job['title'] }} at {{ job['company'] }}, {{ job['location'] }}. Apply now via ZimJobs Hub.{% endblock %}
 {% block head %}
@@ -18,7 +19,14 @@
   <span>{{ job['title'] }}</span>
 </nav>
 
-<article class="card detail">
+<article class="card detail"
+         data-track-view="job_view"
+         data-track-job-id="{{ job['id'] }}"
+         data-track-job-title="{{ job['title'] }}"
+         data-track-category="{{ job['category'] }}"
+         data-track-location="{{ job['location'] }}"
+         data-track-company="{{ job['company'] }}"
+         data-track-source="job_detail">
   <div class="badges">
     {% if job['featured'] %}<span class="badge gold">★ Featured</span>{% endif %}
     {% if job['created_at']|is_new %}<span class="badge green">New</span>{% endif %}
@@ -55,18 +63,40 @@
 
   {% set apply_url = job['apply_url']|safe_external_url %}
   {% if apply_url %}
-  <a class="btn" href="{{ apply_url }}" rel="nofollow noopener" target="_blank">Apply on official site →</a>
+  <a class="btn" href="{{ apply_url }}" rel="nofollow noopener" target="_blank"
+     data-track-event="apply_click_out"
+     data-track-job-id="{{ job['id'] }}"
+     data-track-job-title="{{ job['title'] }}"
+     data-track-category="{{ job['category'] }}"
+     data-track-location="{{ job['location'] }}"
+     data-track-company="{{ job['company'] }}"
+     data-track-source="job_detail">Apply on official site →</a>
   {% else %}
   <p class="err">This listing has an invalid apply link. Please verify the employer source before applying.</p>
   {% endif %}
   <div class="share">
     <a class="btn wa-share"
-       href="https://wa.me/?text={{ (job['title'] ~ ' at ' ~ job['company'] ~ ' — ' ~ url)|urlencode }}">
+       href="https://wa.me/?text={{ (job['title'] ~ ' at ' ~ job['company'] ~ ' — ' ~ url)|urlencode }}"
+       data-track-event="whatsapp_channel_join_click"
+       data-track-job-id="{{ job['id'] }}"
+       data-track-job-title="{{ job['title'] }}"
+       data-track-category="{{ job['category'] }}"
+       data-track-location="{{ job['location'] }}"
+       data-track-company="{{ job['company'] }}"
+       data-track-source="job_share">
        Share on WhatsApp</a>
     <button class="btn ghost" data-copy="{{ url }}">Copy link</button>
     {% if current_user %}
     <form method="post" class="inline-form"
-          action="/job/{{ job['id'] }}/{{ 'unsave' if is_saved(job['id']) else 'save' }}">
+          action="/job/{{ job['id'] }}/{{ 'unsave' if is_saved(job['id']) else 'save' }}"
+          data-track-event="save_job"
+          data-track-job-id="{{ job['id'] }}"
+          data-track-job-title="{{ job['title'] }}"
+          data-track-category="{{ job['category'] }}"
+          data-track-location="{{ job['location'] }}"
+          data-track-company="{{ job['company'] }}"
+          data-track-source="job_detail"
+          data-track-action="{{ 'unsave' if is_saved(job['id']) else 'save' }}">
       <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
       <button class="btn ghost" type="submit">
         {{ '★ Saved' if is_saved(job['id']) else '☆ Save job' }}</button>
@@ -75,6 +105,23 @@
   </div>
   <p class="meta">⚠ Always apply on the official source. Never pay anyone to apply for a job.</p>
 </article>
+
+{% set sticky_apply_url = job['apply_url']|safe_external_url %}
+{% if sticky_apply_url %}
+<div class="sticky-apply-spacer" aria-hidden="true"></div>
+<div class="sticky-apply" role="region" aria-label="Apply for this job">
+  <a class="btn" href="{{ sticky_apply_url }}" rel="nofollow noopener" target="_blank"
+     data-track-event="apply_click_out"
+     data-track-job-id="{{ job['id'] }}"
+     data-track-job-title="{{ job['title'] }}"
+     data-track-category="{{ job['category'] }}"
+     data-track-location="{{ job['location'] }}"
+     data-track-company="{{ job['company'] }}"
+     data-track-source="sticky_apply">Apply on official site</a>
+</div>
+{% endif %}
+
+{{ affiliate_block(affiliate_offers, "job_detail", "Helpful tools before you apply", "Use these only if they help you submit a stronger application. The official job application remains free and separate.") }}
 
 <aside class="card promo">
   <h2>Need a CV that gets interviews?</h2>

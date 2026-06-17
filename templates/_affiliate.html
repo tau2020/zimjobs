@@ -1,0 +1,32 @@
+{% macro affiliate_block(offers, placement_id, title="Recommended tools", intro="") %}
+{% if offers %}
+<section class="card affiliate-block" aria-labelledby="aff-{{ placement_id }}">
+  <div class="affiliate-head">
+    <span class="badge blue">Recommended</span>
+    <p class="affiliate-disclosure">{{ offers[0]['disclosure_text'] or "This page may contain affiliate links. If you purchase through these links, we may earn a commission at no extra cost to you." }}</p>
+  </div>
+  <h2 id="aff-{{ placement_id }}">{{ title }}</h2>
+  {% if intro %}<p class="affiliate-intro">{{ intro }}</p>{% endif %}
+  <div class="affiliate-list">
+    {% for offer in offers %}
+    <article class="affiliate-offer"
+             data-affiliate-impression
+             data-offer-id="{{ offer['id'] }}"
+             data-placement-id="{{ placement_id }}"
+             data-job-category="{{ offer.get('job_category', '') }}">
+      {% if offer['image_url'] %}
+      <img src="{{ offer['image_url'] }}" alt="" loading="lazy">
+      {% endif %}
+      <div>
+        <p class="affiliate-kicker">{{ offer['offer_category'].replace('_', ' ')|title }}</p>
+        <h3>{{ offer['display_title'] }}</h3>
+        <p>{{ offer['description'] }}</p>
+        <a class="btn sm" href="{{ offer['click_url'] }}"
+           rel="nofollow sponsored noopener">{{ offer['cta_text'] }}</a>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endmacro %}

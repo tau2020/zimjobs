@@ -6,6 +6,10 @@
 <meta name="theme-color" content="#0F766E">
 <title>{% block title %}ZimJobs Hub — Jobs in Zimbabwe & Remote Work{% endblock %}</title>
 <meta name="description" content="{% block desc %}Latest jobs in Zimbabwe: NGO, government, private sector, internships and remote jobs that hire Zimbabweans. Updated daily.{% endblock %}">
+{% set resolved_canonical = canonical_url|default(default_canonical_url|default('')) %}
+{% if resolved_canonical %}<link rel="canonical" href="{{ resolved_canonical }}">{% endif %}
+{% set resolved_robots = robots_meta|default(default_robots_meta|default('')) %}
+{% if resolved_robots %}<meta name="robots" content="{{ resolved_robots }}">{% endif %}
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <link rel="icon" href="{{ url_for('static', filename='icon.svg') }}" type="image/svg+xml">
@@ -13,7 +17,7 @@
 <link rel="alternate" type="application/rss+xml" title="ZimJobs Hub" href="/feed.xml">
 {% block head %}{% endblock %}
 </head>
-<body>
+<body data-user-logged-in="{{ 'true' if current_user else 'false' }}">
 <header>
   <div class="bar">
     <a class="logo" href="/">Zim<span>Jobs</span><small>Hub</small></a>
@@ -34,7 +38,9 @@
 <main>{% block content %}{% endblock %}</main>
 
 <footer>
-  <p><a href="/services">CV Writing</a> · <a href="/post">Post a Job</a> ·
+  <p><a href="/resources/career-resources">Career Resources</a> ·
+     <a href="/resources/employer-resources">Employer Resources</a> ·
+     <a href="/services">CV Writing</a> · <a href="/post">Post a Job</a> ·
      <a href="/feed.xml">RSS</a>{% if current_user %} · <a href="/account">My Account</a>{% if current_user['role'] == 'admin' %} · <a href="/admin/">Admin</a>{% endif %}{% else %} · <a href="/login">Login</a> · <a href="/register">Register</a>{% endif %}</p>
   <p>© ZimJobs Hub — jobs in Zimbabwe &amp; remote work for Zimbabweans.</p>
 </footer>

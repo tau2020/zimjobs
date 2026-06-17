@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Affiliate Offers | ZimJobs Hub{% endblock %}
+{% block content %}
+{% set active = 'affiliates' %}{% include "admin/_nav.html" %}
+{% include "_flashes.html" %}
+<article class="card detail">
+  <h1>Affiliate Offers</h1>
+  <p class="meta">Manage recommendation inventory, targeting, priority, and placeholder affiliate links.</p>
+  <p><a class="btn" href="/admin/affiliates/new">New affiliate offer</a></p>
+  <div class="table-wrap"><table class="table">
+    <tr>
+      <th>Offer</th><th>Audience</th><th>Placements</th><th>Status</th>
+      <th>Views</th><th>Clicks</th><th></th>
+    </tr>
+    {% for offer in offers %}
+    <tr>
+      <td><b>{{ offer['display_title'] }}</b><br><span class="meta">{{ offer['offer_category'] }} · priority {{ offer['priority_score'] }}</span></td>
+      <td>{{ offer['audience_type'] }}</td>
+      <td>{{ offer['placement_locations'] }}</td>
+      <td>{{ 'Active' if offer['is_active'] else 'Inactive' }}</td>
+      <td>{{ offer['impressions'] or 0 }}</td>
+      <td>{{ offer['clicks'] or 0 }}</td>
+      <td class="actions">
+        <a class="btn sm ghost" href="/admin/affiliates/{{ offer['id'] }}/edit">Edit</a>
+        <form method="post" class="inline-form" action="/admin/affiliates/{{ offer['id'] }}/delete">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <button class="btn sm danger" type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</article>
+{% endblock %}

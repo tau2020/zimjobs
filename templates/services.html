@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_affiliate.html" import affiliate_block %}
 {% block title %}CV Writing & Career Services | ZimJobs Hub{% endblock %}
 {% block content %}
 <article class="card detail">
@@ -19,7 +20,11 @@
     <li>Pay via <strong>EcoCash / InnBucks</strong> (local) or <strong>PayPal</strong> (diaspora)</li>
     <li>Receive your polished CV within 24 hours</li>
   </ol>
-  <a class="btn wa-share" href="https://wa.me/2637XXXXXXXX?text=Hi,%20I%20want%20a%20CV%20rewrite">
+  <a class="btn wa-share" href="https://wa.me/2637XXXXXXXX?text=Hi,%20I%20want%20a%20CV%20rewrite"
+     data-track-event="cv_service_click,whatsapp_channel_join_click"
+     data-track-source="services"
+     data-track-category="cv_writing">
      Order via WhatsApp →</a>
 </article>
+{{ affiliate_block(affiliate_offers, "resource_page", "More application tools", "Compare additional CV, profile, and interview resources before choosing what fits your situation.") }}
 {% endblock %}

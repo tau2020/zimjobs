@@ -6,7 +6,7 @@ from traceback import format_exception
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
 from flask import (Flask, g, request, render_template, abort,
-                   Response, redirect, url_for, has_request_context)
+                   Response, redirect, url_for, has_request_context, flash)
 from flask_compress import Compress
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -58,6 +58,12 @@ SITE_CONFIG = {
     "default_country_code": "ZW",
     "default_remote_applicant_country": "Zimbabwe",
 }
+WHATSAPP_CHANNEL_URL = os.environ.get("WHATSAPP_CHANNEL_URL", "").strip()
+AFFILIATE_DISCLOSURE = (
+    "This page may contain affiliate links. If you purchase through these links, "
+    "we may earn a commission at no extra cost to you."
+)
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 CATEGORIES = ["NGO & Development", "Government", "Private Sector",
               "Remote & International", "Internships", "Gigs"]
@@ -87,6 +93,136 @@ SORT_OPTIONS = {
     "featured": "Featured first",
     "newest":   "Newest",
     "deadline": "Deadline soon",
+}
+
+AFFILIATE_RESOURCE_PAGES = {
+    "career-resources": {
+        "title": "Career Resources for Job Seekers",
+        "desc": "Recommended CV, interview, course, and remote-work tools for Zimbabwean job seekers.",
+        "audience": "job_seeker",
+        "categories": ["resume", "interview", "courses", "remote_work", "portfolio", "career_coaching"],
+        "intro": "Use these tools to improve your application materials, prepare for interviews, and build skills before applying.",
+    },
+    "resume-tools": {
+        "title": "Best Resume and CV Tools for Job Seekers",
+        "desc": "Helpful CV builders, resume review services, and profile optimization tools.",
+        "audience": "job_seeker",
+        "categories": ["resume", "cv_review", "linkedin"],
+        "intro": "A strong CV should be clear, ATS-friendly, and tailored to the job. These resources help with that work.",
+    },
+    "interview-prep": {
+        "title": "Best Interview Prep Tools",
+        "desc": "Interview practice, coaching, and salary negotiation resources.",
+        "audience": "job_seeker",
+        "categories": ["interview", "salary", "career_coaching"],
+        "intro": "Prepare practical examples, rehearse common questions, and go into interviews with a clearer plan.",
+    },
+    "online-courses": {
+        "title": "Best Online Courses to Improve Your Career",
+        "desc": "Recommended courses and certifications for common job categories.",
+        "audience": "student",
+        "categories": ["courses", "certifications", "bootcamps"],
+        "intro": "Short, targeted training can help close skill gaps for entry-level, technical, and professional roles.",
+    },
+    "remote-work-tools": {
+        "title": "Best Remote Work Tools",
+        "desc": "Tools for remote job seekers, freelancers, and distributed teams.",
+        "audience": "remote_worker",
+        "categories": ["remote_work", "productivity", "portfolio", "freelance"],
+        "intro": "Remote roles reward clear communication, proof of work, reliable payments, and organized workflows.",
+    },
+    "employer-resources": {
+        "title": "Best Tools for Employers Hiring Talent",
+        "desc": "Recommended ATS, HR, payroll, screening, and onboarding tools for employers.",
+        "audience": "employer",
+        "categories": ["ats", "payroll", "background_checks", "hr_software", "skills_testing"],
+        "intro": "Use these tools to manage applicants professionally, screen candidates fairly, and improve hiring operations.",
+    },
+    "before-you-apply": {
+        "title": "Recommended Tools Before You Apply",
+        "desc": "A practical checklist of CV, interview, and skill-building tools before sending an application.",
+        "audience": "job_seeker",
+        "categories": ["resume", "interview", "courses", "portfolio"],
+        "intro": "Before applying, check that your CV matches the role, your profile is current, and you can speak clearly about your skills.",
+    },
+}
+
+SEO_LANDING_PAGES = {
+    "harare": {
+        "title": "Jobs in Harare",
+        "desc": "Find current Harare jobs across NGO, government, private sector, internships, and remote-friendly roles.",
+        "h1": "Jobs in Harare",
+        "intro": "Browse active job vacancies in Harare, including office, field, graduate, government, NGO, and private sector roles.",
+        "location_like": "Harare",
+        "related": ["internships-zimbabwe", "ngo-jobs-zimbabwe", "graduate-trainee-zimbabwe"],
+        "alert_category": "",
+        "alert_location": "Harare",
+    },
+    "ngo-jobs-zimbabwe": {
+        "title": "NGO Jobs in Zimbabwe",
+        "desc": "Latest NGO and development jobs in Zimbabwe, including programme, finance, M&E, health, and operations roles.",
+        "h1": "NGO Jobs in Zimbabwe",
+        "intro": "Find active NGO and development vacancies from local and international organisations hiring in Zimbabwe.",
+        "category": "NGO & Development",
+        "related": ["harare", "government-jobs-zimbabwe", "remote-jobs-zimbabweans"],
+        "alert_category": "NGO & Development",
+        "alert_location": "",
+    },
+    "internships-zimbabwe": {
+        "title": "Internships in Zimbabwe",
+        "desc": "Browse current internships, attachments, graduate entry roles, and student opportunities in Zimbabwe.",
+        "h1": "Internships in Zimbabwe",
+        "intro": "Explore active internship and student opportunity listings for Zimbabwean graduates and early-career applicants.",
+        "category": "Internships",
+        "any_terms": ["intern", "internship", "attachment", "graduate"],
+        "related": ["industrial-attachment-zimbabwe", "graduate-trainee-zimbabwe", "harare"],
+        "alert_category": "Internships",
+        "alert_location": "",
+    },
+    "government-jobs-zimbabwe": {
+        "title": "Government Jobs in Zimbabwe",
+        "desc": "Find current government, ministry, council, public sector, and parastatal jobs in Zimbabwe.",
+        "h1": "Government Jobs in Zimbabwe",
+        "intro": "Track active public sector opportunities from ministries, councils, parastatals, and government-linked employers.",
+        "category": "Government",
+        "any_terms": ["government", "ministry", "council", "parastatal"],
+        "related": ["harare", "ngo-jobs-zimbabwe", "graduate-trainee-zimbabwe"],
+        "alert_category": "Government",
+        "alert_location": "",
+    },
+    "industrial-attachment-zimbabwe": {
+        "title": "Industrial Attachment in Zimbabwe",
+        "desc": "Find industrial attachment, student placement, and work-related learning opportunities in Zimbabwe.",
+        "h1": "Industrial Attachment in Zimbabwe",
+        "intro": "Browse attachment and placement roles for students who need practical work experience in Zimbabwe.",
+        "category": "Internships",
+        "any_terms": ["attachment", "industrial attachment", "work related learning", "student placement"],
+        "related": ["internships-zimbabwe", "graduate-trainee-zimbabwe", "harare"],
+        "alert_category": "Internships",
+        "alert_location": "",
+    },
+    "graduate-trainee-zimbabwe": {
+        "title": "Graduate Trainee Jobs in Zimbabwe",
+        "desc": "Current graduate trainee, entry-level, and junior professional jobs for Zimbabwean graduates.",
+        "h1": "Graduate Trainee Jobs in Zimbabwe",
+        "intro": "Find graduate trainee, junior, and entry-level vacancies for recent graduates and early-career professionals.",
+        "any_terms": ["graduate trainee", "graduate", "entry level", "junior"],
+        "related": ["internships-zimbabwe", "industrial-attachment-zimbabwe", "harare"],
+        "alert_category": "",
+        "alert_location": "",
+    },
+    "remote-jobs-zimbabweans": {
+        "title": "Remote Jobs for Zimbabweans",
+        "desc": "Find remote and international jobs that Zimbabweans can apply for, including customer support, admin, tech, and freelance roles.",
+        "h1": "Remote Jobs for Zimbabweans",
+        "intro": "Browse remote-friendly jobs and international opportunities that can be suitable for applicants based in Zimbabwe.",
+        "category": "Remote & International",
+        "remote_status": "Remote",
+        "any_terms": ["remote", "worldwide", "international", "virtual"],
+        "related": ["ngo-jobs-zimbabwe", "harare", "graduate-trainee-zimbabwe"],
+        "alert_category": "Remote & International",
+        "alert_location": "",
+    },
 }
 
 SIMILAR_LIMIT = 4
@@ -225,6 +361,7 @@ RATE_LIMIT_RULES = {
     "register": (10, 60 * 60),
     "post_job": (20, 60 * 60),
     "search": (120, 60),
+    "email_alert": (20, 60 * 60),
 }
 
 
@@ -265,6 +402,8 @@ def enforce_route_rate_limit():
         rule = ("register", *RATE_LIMIT_RULES["register"])
     elif endpoint == "post" and request.method == "POST":
         rule = ("post_job", *RATE_LIMIT_RULES["post_job"])
+    elif endpoint == "email_alert_signup" and request.method == "POST":
+        rule = ("email_alert", *RATE_LIMIT_RULES["email_alert"])
     elif endpoint == "index" and request.args.get("q"):
         rule = ("search", *RATE_LIMIT_RULES["search"])
     if rule:
@@ -461,6 +600,56 @@ def init_db():
     db.execute("""CREATE TRIGGER IF NOT EXISTS jobs_ad AFTER DELETE ON jobs BEGIN
         INSERT INTO jobs_fts(jobs_fts,rowid,title,company,summary,location)
         VALUES('delete',old.id,old.title,old.company,old.summary,old.location); END""")
+    db.execute("""CREATE TABLE IF NOT EXISTS affiliate_offers(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        offer_category TEXT NOT NULL,
+        audience_type TEXT NOT NULL,
+        job_category_targets TEXT DEFAULT '',
+        placement_locations TEXT NOT NULL,
+        affiliate_url TEXT NOT NULL,
+        display_title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        cta_text TEXT NOT NULL,
+        image_url TEXT,
+        disclosure_text TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        priority_score INTEGER NOT NULL DEFAULT 0,
+        tracking_id TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS affiliate_events(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        offer_id INTEGER NOT NULL,
+        placement_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        page_path TEXT,
+        job_category TEXT,
+        user_type TEXT,
+        device_type TEXT,
+        user_id INTEGER,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY(offer_id) REFERENCES affiliate_offers(id))""")
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_affiliate_events_offer "
+        "ON affiliate_events(offer_id, event_type, created_at)")
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_affiliate_events_placement "
+        "ON affiliate_events(placement_id, event_type, created_at)")
+    db.execute("""CREATE TABLE IF NOT EXISTS email_alerts(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL,
+        category TEXT DEFAULT '',
+        location TEXT DEFAULT '',
+        source TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')))""")
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_email_alerts_unique "
+        "ON email_alerts(email, category, location)")
+
+    if db.execute("SELECT COUNT(*) FROM affiliate_offers").fetchone()[0] == 0:
+        seed_affiliate_offers(db)
 
     had_jobs = db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] > 0
 
@@ -514,6 +703,190 @@ def init_db():
         db.execute("INSERT INTO jobs_fts(jobs_fts) VALUES('rebuild')")
     db.commit()
     db.close()
+
+
+def seed_affiliate_offers(db):
+    offers = [
+        {
+            "name": "ATS CV Builder",
+            "offer_category": "resume",
+            "audience_type": "job_seeker,student,career_changer",
+            "job_category_targets": "NGO & Development,Government,Private Sector,Internships,Remote & International,Gigs",
+            "placement_locations": "job_detail,empty_search,saved_jobs,resource_page",
+            "affiliate_url": "https://example.com/affiliate/cv-builder",
+            "display_title": "Build an ATS-friendly CV",
+            "description": "Create a clean CV you can tailor before applying to roles on ZimJobs Hub.",
+            "cta_text": "Try the CV builder",
+            "priority_score": 95,
+            "tracking_id": "cv-builder-placeholder",
+        },
+        {
+            "name": "Professional CV Review",
+            "offer_category": "cv_review",
+            "audience_type": "job_seeker,career_changer",
+            "job_category_targets": "NGO & Development,Government,Private Sector,Internships,Remote & International",
+            "placement_locations": "job_detail,saved_jobs,resource_page",
+            "affiliate_url": "https://example.com/affiliate/cv-review",
+            "display_title": "Get your CV reviewed",
+            "description": "A second pair of eyes can help catch weak bullet points, formatting issues, and missing keywords.",
+            "cta_text": "Review my CV",
+            "priority_score": 88,
+            "tracking_id": "cv-review-placeholder",
+        },
+        {
+            "name": "Interview Practice",
+            "offer_category": "interview",
+            "audience_type": "job_seeker,student,career_changer",
+            "job_category_targets": "NGO & Development,Government,Private Sector,Internships,Remote & International",
+            "placement_locations": "job_detail,saved_jobs,resource_page",
+            "affiliate_url": "https://example.com/affiliate/interview-practice",
+            "display_title": "Practice interview questions",
+            "description": "Rehearse structured answers for common interview questions before you apply or get shortlisted.",
+            "cta_text": "Start practicing",
+            "priority_score": 84,
+            "tracking_id": "interview-placeholder",
+        },
+        {
+            "name": "Online Career Courses",
+            "offer_category": "courses",
+            "audience_type": "job_seeker,student,career_changer",
+            "job_category_targets": "Internships,Private Sector,Remote & International,NGO & Development",
+            "placement_locations": "job_detail,empty_search,resource_page",
+            "affiliate_url": "https://example.com/affiliate/career-courses",
+            "display_title": "Close a skill gap with a short course",
+            "description": "Find practical courses for Excel, project management, customer support, data, and business skills.",
+            "cta_text": "Browse courses",
+            "priority_score": 76,
+            "tracking_id": "courses-placeholder",
+        },
+        {
+            "name": "Coding Interview Prep",
+            "offer_category": "certifications",
+            "audience_type": "job_seeker,student,remote_worker",
+            "job_category_targets": "Remote & International,Private Sector",
+            "placement_locations": "job_detail,resource_page",
+            "affiliate_url": "https://example.com/affiliate/coding-interview-prep",
+            "display_title": "Prepare for technical interviews",
+            "description": "Practice coding, systems, GitHub portfolio reviews, and cloud certification paths for software roles.",
+            "cta_text": "Prepare for tech roles",
+            "priority_score": 90,
+            "tracking_id": "tech-prep-placeholder",
+        },
+        {
+            "name": "Healthcare Certification Prep",
+            "offer_category": "certifications",
+            "audience_type": "job_seeker,student",
+            "job_category_targets": "Private Sector,Government,NGO & Development",
+            "placement_locations": "job_detail,resource_page",
+            "affiliate_url": "https://example.com/affiliate/healthcare-certifications",
+            "display_title": "Prepare healthcare credentials",
+            "description": "Review licensing, compliance, and healthcare interview resources before applying to clinical roles.",
+            "cta_text": "View healthcare prep",
+            "priority_score": 82,
+            "tracking_id": "healthcare-placeholder",
+        },
+        {
+            "name": "Remote Work Toolkit",
+            "offer_category": "remote_work",
+            "audience_type": "job_seeker,remote_worker,freelancer",
+            "job_category_targets": "Remote & International,Gigs",
+            "placement_locations": "job_detail,empty_search,resource_page",
+            "affiliate_url": "https://example.com/affiliate/remote-work-tools",
+            "display_title": "Set up for remote work",
+            "description": "Organize applications, portfolio links, payments, and productivity tools for remote roles.",
+            "cta_text": "View remote tools",
+            "priority_score": 86,
+            "tracking_id": "remote-toolkit-placeholder",
+        },
+        {
+            "name": "Portfolio Website Builder",
+            "offer_category": "portfolio",
+            "audience_type": "job_seeker,student,remote_worker,career_changer",
+            "job_category_targets": "Remote & International,Private Sector,Gigs",
+            "placement_locations": "job_detail,resource_page",
+            "affiliate_url": "https://example.com/affiliate/portfolio-builder",
+            "display_title": "Build a simple portfolio site",
+            "description": "Show projects, writing samples, case studies, or freelance work with a professional portfolio.",
+            "cta_text": "Build a portfolio",
+            "priority_score": 72,
+            "tracking_id": "portfolio-placeholder",
+        },
+        {
+            "name": "Salary Negotiation Guide",
+            "offer_category": "salary",
+            "audience_type": "job_seeker,career_changer",
+            "job_category_targets": "Private Sector,Remote & International,NGO & Development",
+            "placement_locations": "job_detail,resource_page",
+            "affiliate_url": "https://example.com/affiliate/salary-negotiation",
+            "display_title": "Prepare your salary conversation",
+            "description": "Compare expectations, script negotiation points, and avoid underselling senior experience.",
+            "cta_text": "Plan negotiation",
+            "priority_score": 70,
+            "tracking_id": "salary-placeholder",
+        },
+        {
+            "name": "Applicant Tracking System",
+            "offer_category": "ats",
+            "audience_type": "employer,recruiter",
+            "job_category_targets": "All",
+            "placement_locations": "employer_page,post_job,resource_page",
+            "affiliate_url": "https://example.com/affiliate/ats",
+            "display_title": "Manage applicants in one place",
+            "description": "Use an ATS to collect applications, shortlist candidates, and keep hiring notes organized.",
+            "cta_text": "Compare ATS tools",
+            "priority_score": 94,
+            "tracking_id": "ats-placeholder",
+        },
+        {
+            "name": "Payroll and HR Software",
+            "offer_category": "payroll",
+            "audience_type": "employer,recruiter",
+            "job_category_targets": "All",
+            "placement_locations": "employer_page,post_job,resource_page",
+            "affiliate_url": "https://example.com/affiliate/payroll-hr",
+            "display_title": "Simplify payroll and HR admin",
+            "description": "Evaluate payroll, leave, onboarding, and employee record tools for growing teams.",
+            "cta_text": "View HR tools",
+            "priority_score": 82,
+            "tracking_id": "payroll-placeholder",
+        },
+        {
+            "name": "Background Check Service",
+            "offer_category": "background_checks",
+            "audience_type": "employer,recruiter,job_seeker",
+            "job_category_targets": "Private Sector,Government,NGO & Development",
+            "placement_locations": "employer_page,job_detail,resource_page",
+            "affiliate_url": "https://example.com/affiliate/background-checks",
+            "display_title": "Prepare background checks professionally",
+            "description": "Helpful for employers screening candidates and applicants preparing required documents.",
+            "cta_text": "Review options",
+            "priority_score": 78,
+            "tracking_id": "background-placeholder",
+        },
+        {
+            "name": "Skills Testing Platform",
+            "offer_category": "skills_testing",
+            "audience_type": "employer,recruiter",
+            "job_category_targets": "All",
+            "placement_locations": "employer_page,resource_page",
+            "affiliate_url": "https://example.com/affiliate/skills-testing",
+            "display_title": "Screen candidates with skills tests",
+            "description": "Add structured tests for technical, admin, language, and customer support roles.",
+            "cta_text": "Explore testing tools",
+            "priority_score": 76,
+            "tracking_id": "skills-placeholder",
+        },
+    ]
+    db.executemany(
+        """INSERT INTO affiliate_offers(
+            name, offer_category, audience_type, job_category_targets,
+            placement_locations, affiliate_url, display_title, description,
+            cta_text, priority_score, tracking_id, disclosure_text)
+            VALUES(:name,:offer_category,:audience_type,:job_category_targets,
+            :placement_locations,:affiliate_url,:display_title,:description,
+            :cta_text,:priority_score,:tracking_id,:disclosure_text)""",
+        [{**offer, "disclosure_text": AFFILIATE_DISCLOSURE} for offer in offers],
+    )
 
 
 # ----------------------------- helpers ------------------------------
@@ -689,6 +1062,171 @@ def distinct_values(db, column):
     return [r["v"] for r in rows]
 
 
+def csv_values(value):
+    return {
+        part.strip().lower()
+        for part in re.split(r"[,;|]", value or "")
+        if part.strip()
+    }
+
+
+def affiliate_device_type():
+    ua = (request.headers.get("User-Agent") or "").lower()
+    if any(token in ua for token in ("mobile", "android", "iphone")):
+        return "mobile"
+    if any(token in ua for token in ("ipad", "tablet")):
+        return "tablet"
+    return "desktop"
+
+
+def current_affiliate_user_type(default="job_seeker"):
+    user = g.get("user")
+    if user and row_value(user, "role") == "admin":
+        return "employer"
+    return default
+
+
+def affiliate_click_url(offer, placement_id, job_category=""):
+    args = {
+        "placement": placement_id,
+        "page": request.path if has_request_context() else "",
+        "job_category": job_category or "",
+    }
+    return url_for("affiliate_click", offer_id=offer["id"], **args)
+
+
+def affiliate_outbound_url(offer, placement_id):
+    url = safe_external_url(offer["affiliate_url"])
+    if not url:
+        return ""
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.setdefault("utm_source", "job_board")
+    query.setdefault("utm_medium", "affiliate")
+    query.setdefault("utm_campaign", row_value(offer, "offer_category", "affiliate"))
+    query.setdefault("utm_content", placement_id)
+    if row_value(offer, "tracking_id"):
+        query.setdefault("tracking_id", offer["tracking_id"])
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def log_affiliate_event(offer_id, placement_id, event_type, page_path="",
+                        job_category="", user_type="", device_type=""):
+    if event_type not in {"impression", "click"}:
+        return
+    user = g.get("user")
+    get_db().execute(
+        """INSERT INTO affiliate_events(
+            offer_id, placement_id, event_type, page_path, job_category,
+            user_type, device_type, user_id)
+            VALUES(?,?,?,?,?,?,?,?)""",
+        (
+            int(offer_id),
+            clean_inline_job_text(placement_id)[:80],
+            event_type,
+            clean_inline_job_text(page_path or request.path)[:240],
+            clean_inline_job_text(job_category)[:80],
+            clean_inline_job_text(user_type or current_affiliate_user_type())[:40],
+            clean_inline_job_text(device_type or affiliate_device_type())[:40],
+            user["id"] if user else None,
+        ),
+    )
+    get_db().commit()
+
+
+def affiliate_keyword_score(offer, job=None, query=""):
+    haystack = " ".join([
+        row_value(job, "title") if job else "",
+        row_value(job, "summary") if job else "",
+        row_value(job, "job_description") if job else "",
+        row_value(job, "requirements") if job else "",
+        row_value(job, "remote_status") if job else "",
+        row_value(job, "experience_level") if job else "",
+        query or "",
+    ]).lower()
+    category = row_value(offer, "offer_category")
+    if category in {"certifications", "bootcamps"} and any(
+        word in haystack for word in (
+            "software", "developer", "engineer", "data", "cloud", "python",
+            "javascript", "it ", "ict", "cyber", "systems"
+        )
+    ):
+        return 30
+    if category == "certifications" and any(
+        word in haystack for word in (
+            "nurse", "clinical", "medical", "health", "pharmacy", "doctor",
+            "midwife", "patient"
+        )
+    ):
+        return 28
+    if category == "remote_work" and any(
+        word in haystack for word in ("remote", "virtual", "worldwide", "freelance")
+    ):
+        return 26
+    if category == "portfolio" and any(
+        word in haystack for word in ("designer", "developer", "writer", "creative", "remote")
+    ):
+        return 18
+    if category == "salary" and any(
+        word in haystack for word in ("senior", "manager", "lead", "director", "management")
+    ):
+        return 20
+    if category in {"resume", "cv_review", "interview"} and any(
+        word in haystack for word in ("intern", "graduate", "junior", "entry")
+    ):
+        return 16
+    return 0
+
+
+def select_affiliate_offers(audience="job_seeker", placement="resource_page",
+                            job=None, category="", query="", limit=2,
+                            offer_categories=None):
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM affiliate_offers WHERE is_active=1"
+    ).fetchall()
+    wanted_categories = set(offer_categories or [])
+    scored = []
+    job_category = category or (row_value(job, "category") if job else "")
+    for offer in rows:
+        offer_audiences = csv_values(offer["audience_type"])
+        offer_placements = csv_values(offer["placement_locations"])
+        offer_targets = csv_values(offer["job_category_targets"])
+        if audience and audience.lower() not in offer_audiences:
+            continue
+        if placement.lower() not in offer_placements:
+            continue
+        if wanted_categories and offer["offer_category"] not in wanted_categories:
+            continue
+
+        score = int(row_value(offer, "priority_score", 0) or 0)
+        if "all" in offer_targets:
+            score += 8
+        elif job_category and job_category.lower() in offer_targets:
+            score += 30
+        elif job_category:
+            score -= 18
+        score += affiliate_keyword_score(offer, job=job, query=query)
+        if placement == "job_detail" and offer["offer_category"] in {"resume", "cv_review", "interview"}:
+            score += 12
+        scored.append((score, offer))
+
+    scored.sort(key=lambda item: (item[0], item[1]["priority_score"], item[1]["id"]), reverse=True)
+    selected = []
+    seen_categories = set()
+    for _, offer in scored:
+        if offer["offer_category"] in seen_categories and len(scored) > limit:
+            continue
+        data = dict(offer)
+        data["job_category"] = job_category
+        data["click_url"] = affiliate_click_url(offer, placement, job_category)
+        selected.append(data)
+        seen_categories.add(offer["offer_category"])
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 @app.template_filter("is_new")
 def is_new(ts, days=3):
     try:
@@ -717,10 +1255,120 @@ STOP_WORDS = {
     "experience", "skills", "strong", "apply", "official", "site",
 }
 
+LOW_VALUE_JOB_TITLES = {
+    "jobs",
+    "job",
+    "categories",
+    "category",
+    "employers",
+    "employer",
+    "cookies policy",
+    "cookie policy",
+    "privacy policy",
+    "terms",
+    "terms and conditions",
+    "disclaimer",
+}
+
 
 def row_value(row, key, default=""):
     """Read optional sqlite.Row columns without assuming every DB is migrated."""
     return row[key] if key in row.keys() and row[key] is not None else default
+
+
+def row_looks_low_value_job(row):
+    title = clean_inline_job_text(row_value(row, "title")).lower()
+    if not title or title in LOW_VALUE_JOB_TITLES:
+        return True
+    if len(title) > MAX_TEXT_LENGTHS["title"]:
+        return True
+    apply_path = urlsplit(row_value(row, "apply_url")).path.strip("/").lower()
+    if apply_path in {"jobs", "job", "categories", "employers"} and title in LOW_VALUE_JOB_TITLES:
+        return True
+    return False
+
+
+def row_is_public_job(row):
+    return (
+        not is_closed_job(row)
+        and not row_looks_accidentally_merged(row)
+        and not row_looks_low_value_job(row)
+    )
+
+
+def absolute_url(path=""):
+    if not path:
+        path = "/"
+    if path.startswith(("http://", "https://")):
+        return path
+    if not path.startswith("/"):
+        path = "/" + path
+    return f"{SITE_URL}{path}"
+
+
+def canonical_path():
+    endpoint = request.endpoint or ""
+    if endpoint == "index":
+        return "/"
+    if endpoint == "services":
+        return "/services"
+    if endpoint == "post":
+        return "/post"
+    if endpoint == "resource_page":
+        return request.path
+    if endpoint == "seo_landing_page":
+        return request.path
+    return ""
+
+
+@app.context_processor
+def inject_seo_context():
+    if not has_request_context():
+        return {}
+
+    endpoint = request.endpoint or ""
+    robots_meta = ""
+    if endpoint == "index" and request.args:
+        robots_meta = "noindex,follow"
+    elif endpoint.startswith("auth.") or endpoint.startswith("admin."):
+        robots_meta = "noindex,follow"
+    elif endpoint in {"affiliate_click", "affiliate_event", "health", "health_live"}:
+        robots_meta = "noindex,follow"
+
+    path = canonical_path()
+    return {
+        "default_canonical_url": absolute_url(path) if path else "",
+        "default_robots_meta": robots_meta,
+        "whatsapp_channel_url": WHATSAPP_CHANNEL_URL,
+    }
+
+
+def url_with_query_param(target, key, value):
+    parts = urlsplit(target or "/")
+    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+             if k != key]
+    query.append((key, value))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path,
+                       urlencode(query), parts.fragment))
+
+
+def safe_form_next(default="/"):
+    target = request.form.get("next") or request.referrer or default
+    if target.startswith(SITE_URL):
+        parts = urlsplit(target)
+        target = urlunsplit(("", "", parts.path or "/", parts.query, ""))
+    return safe_redirect_target(target, default)
+
+
+def sitemap_entry(loc, lastmod="", changefreq="", priority=""):
+    bits = [f"<loc>{escape(loc)}</loc>"]
+    if lastmod:
+        bits.append(f"<lastmod>{escape(lastmod[:10])}</lastmod>")
+    if changefreq:
+        bits.append(f"<changefreq>{escape(changefreq)}</changefreq>")
+    if priority:
+        bits.append(f"<priority>{escape(priority)}</priority>")
+    return "<url>" + "".join(bits) + "</url>"
 
 
 def row_looks_accidentally_merged(row):
@@ -815,9 +1463,7 @@ def similar_jobs(db, job, limit=SIMILAR_LIMIT):
         (job["id"],)).fetchall()
     ranked, fallback = [], []
     for candidate in candidates:
-        if is_closed_job(candidate):
-            continue
-        if row_looks_accidentally_merged(candidate):
+        if not row_is_public_job(candidate):
             continue
 
         fallback.append(candidate)
@@ -866,6 +1512,47 @@ def similar_jobs(db, job, limit=SIMILAR_LIMIT):
         if len(selected) == limit:
             break
     return selected
+
+
+def landing_page_jobs(db, page, limit=PER_PAGE):
+    cols = job_columns(db)
+    where = [active_jobs_where_sql(cols, "jobs")]
+    args = []
+
+    category = page.get("category")
+    if category:
+        where.append("category = ?")
+        args.append(category)
+
+    remote_status = page.get("remote_status")
+    if remote_status and "remote_status" in cols:
+        where.append("(remote_status = ? OR location LIKE ?)")
+        args.extend([remote_status, f"%{remote_status}%"])
+
+    location_like = page.get("location_like")
+    if location_like:
+        where.append("location LIKE ?")
+        args.append(f"%{location_like}%")
+
+    terms = [term for term in page.get("any_terms", []) if term]
+    if terms:
+        search_fields = ["title", "company", "summary", "location"]
+        if "job_description" in cols:
+            search_fields.append("job_description")
+        if "requirements" in cols:
+            search_fields.append("requirements")
+        term_groups = []
+        for term in terms:
+            term_groups.append("(" + " OR ".join(f"{field} LIKE ?" for field in search_fields) + ")")
+            args.extend([f"%{term}%"] * len(search_fields))
+        where.append("(" + " OR ".join(term_groups) + ")")
+
+    rows = db.execute(
+        "SELECT * FROM jobs WHERE " + " AND ".join(where) +
+        " ORDER BY featured DESC, created_at DESC LIMIT ?",
+        args + [limit],
+    ).fetchall()
+    return [row for row in rows if row_is_public_job(row)]
 
 
 @app.template_filter("deadline")
@@ -945,7 +1632,7 @@ def index():
             "SELECT jobs.* " + base +
             f" ORDER BY {order} LIMIT ? OFFSET ?",
             args + [PER_PAGE, (page - 1) * PER_PAGE]).fetchall()
-        jobs = [job for job in jobs if not row_looks_accidentally_merged(job)]
+        jobs = [job for job in jobs if row_is_public_job(job)]
     except sqlite3.OperationalError as exc:
         log_event(
             logging.ERROR,
@@ -961,6 +1648,13 @@ def index():
                "exp": exp, "loc": loc, "sort": sort}
     active = any(v for k, v in filters.items()
                  if k not in ("sort",) and v) or sort != "featured"
+    empty_search_offers = select_affiliate_offers(
+        audience="job_seeker",
+        placement="empty_search",
+        category=cat,
+        query=q,
+        limit=2,
+    ) if not jobs else []
     return render_template(
         "index.html", jobs=jobs, q=q, cat=cat, categories=CATEGORIES,
         page=page, total=total, pages=max(ceil(total / PER_PAGE), 1),
@@ -968,7 +1662,8 @@ def index():
         sort_options=SORT_OPTIONS,
         type_options=distinct_values(db, "employment_type") or [],
         remote_options=distinct_values(db, "remote_status") or [],
-        exp_options=distinct_values(db, "experience_level") or [])
+        exp_options=distinct_values(db, "experience_level") or [],
+        empty_search_offers=empty_search_offers)
 
 
 @app.route("/job/<int:job_id>")
@@ -978,20 +1673,164 @@ def job(job_id, s=None):
         abort(400)
     db  = get_db()
     row = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
-    if not row or is_closed_job(row) or row_looks_accidentally_merged(row):
+    if not row or not row_is_public_job(row):
         abort(404)
     url = f"{SITE_URL}/job/{row['id']}/{slug(row['title'])}"
     similar = similar_jobs(db, row)
     job_json_ld = build_job_posting_json_ld(row, {**SITE_CONFIG, "job_url": url})
+    affiliate_offers = select_affiliate_offers(
+        audience="job_seeker",
+        placement="job_detail",
+        job=row,
+        limit=2,
+    )
     return render_template("job.html", job=row, url=url, similar=similar,
+                           canonical_url=url,
                            job_json_ld=job_json_ld,
+                           affiliate_offers=affiliate_offers,
                            categories=CATEGORIES, cat=None, q="")
+
+
+@app.route("/jobs/<slug_name>/")
+def seo_landing_page(slug_name):
+    page = SEO_LANDING_PAGES.get(slug_name)
+    if not page:
+        abort(404)
+    db = get_db()
+    jobs = landing_page_jobs(db, page)
+    related_pages = [
+        (related_slug, SEO_LANDING_PAGES[related_slug])
+        for related_slug in page.get("related", [])
+        if related_slug in SEO_LANDING_PAGES
+    ]
+    canonical_url = absolute_url(f"/jobs/{slug_name}/")
+    return render_template(
+        "landing.html",
+        page=page,
+        slug_name=slug_name,
+        jobs=jobs,
+        related_pages=related_pages,
+        canonical_url=canonical_url,
+        categories=CATEGORIES,
+        cat=None,
+        q="",
+    )
 
 
 @app.route("/services")
 def services():
+    affiliate_offers = select_affiliate_offers(
+        audience="job_seeker",
+        placement="resource_page",
+        limit=3,
+        offer_categories=["resume", "cv_review", "linkedin", "interview"],
+    )
     return render_template("services.html", categories=CATEGORIES,
-                           cat=None, q="")
+                           cat=None, q="", affiliate_offers=affiliate_offers)
+
+
+@app.route("/resources")
+def resources_home():
+    return redirect(url_for("resource_page", slug_name="career-resources"))
+
+
+@app.route("/resources/<slug_name>")
+def resource_page(slug_name):
+    page = AFFILIATE_RESOURCE_PAGES.get(slug_name)
+    if not page:
+        abort(404)
+    offers = select_affiliate_offers(
+        audience=page["audience"],
+        placement="resource_page",
+        limit=12,
+        offer_categories=page["categories"],
+    )
+    return render_template(
+        "resources.html",
+        page=page,
+        pages=AFFILIATE_RESOURCE_PAGES,
+        offers=offers,
+        disclosure=AFFILIATE_DISCLOSURE,
+        categories=CATEGORIES,
+        cat=None,
+        q="",
+    )
+
+
+@app.route("/alerts/email", methods=["POST"])
+def email_alert_signup():
+    from auth import check_csrf
+    check_csrf()
+    email = clean_inline_job_text(request.form.get("email", "")).lower()
+    category = clean_inline_job_text(request.form.get("category", ""))[:80]
+    location = clean_inline_job_text(request.form.get("location", ""))[:80]
+    source = clean_inline_job_text(request.form.get("source", "unknown"))[:80]
+    target = safe_form_next(url_for("index"))
+
+    if len(email) > 254 or not EMAIL_RE.match(email):
+        flash("Enter a valid email address for job alerts.")
+        return redirect(url_with_query_param(target, "email_alert", "error"))
+
+    db = get_db()
+    db.execute(
+        """INSERT INTO email_alerts(email, category, location, source)
+           VALUES(?,?,?,?)
+           ON CONFLICT(email, category, location)
+           DO UPDATE SET source=excluded.source, updated_at=datetime('now')""",
+        (email, category, location, source),
+    )
+    db.commit()
+    flash("Email job alerts enabled.")
+    return redirect(url_with_query_param(target, "email_alert", "success"))
+
+
+@app.route("/affiliate/click/<int:offer_id>")
+def affiliate_click(offer_id):
+    placement_id = limited_arg("placement", "unknown", max_chars=80)
+    page_path = limited_arg("page", request.referrer or "", max_chars=240)
+    job_category = limited_arg("job_category", "", max_chars=80)
+    offer = get_db().execute(
+        "SELECT * FROM affiliate_offers WHERE id=? AND is_active=1",
+        (offer_id,),
+    ).fetchone()
+    if not offer:
+        abort(404)
+    outbound = affiliate_outbound_url(offer, placement_id)
+    if not outbound:
+        abort(404)
+    log_affiliate_event(
+        offer_id,
+        placement_id,
+        "click",
+        page_path=page_path,
+        job_category=job_category,
+    )
+    return redirect(outbound)
+
+
+@app.route("/affiliate/event", methods=["POST"])
+def affiliate_event():
+    data = request.get_json(silent=True) or {}
+    event_type = clean_inline_job_text(data.get("event_type", ""))[:40]
+    if event_type != "impression":
+        abort(400)
+    try:
+        offer_id = int(data.get("offer_id"))
+    except (TypeError, ValueError):
+        abort(400)
+    if not get_db().execute(
+        "SELECT 1 FROM affiliate_offers WHERE id=? AND is_active=1",
+        (offer_id,),
+    ).fetchone():
+        abort(404)
+    log_affiliate_event(
+        offer_id,
+        clean_inline_job_text(data.get("placement_id", "unknown"))[:80],
+        event_type,
+        page_path=clean_inline_job_text(data.get("page_path", request.path))[:240],
+        job_category=clean_inline_job_text(data.get("job_category", ""))[:80],
+    )
+    return {"ok": True}
 
 
 @app.route("/post", methods=["GET", "POST"])
@@ -1031,7 +1870,12 @@ def post():
                            cat=None, q="", error=error,
                            employment_types=EMPLOYMENT_TYPES,
                            remote_options=REMOTE_OPTIONS,
-                           experience_levels=EXPERIENCE_LEVELS)
+                           experience_levels=EXPERIENCE_LEVELS,
+                           employer_offers=select_affiliate_offers(
+                               audience="employer",
+                               placement="post_job",
+                               limit=2,
+                           ))
 
 
 # ------------------------------- SEO --------------------------------
@@ -1040,11 +1884,31 @@ def sitemap():
     db = get_db()
     where = active_jobs_where_sql(job_columns(db), "jobs")
     rows = db.execute(
-        f"SELECT id,title,created_at FROM jobs WHERE {where} ORDER BY id"
+        f"SELECT * FROM jobs WHERE {where} ORDER BY id"
     ).fetchall()
-    urls = [f"<url><loc>{SITE_URL}/</loc></url>"] + [
-        f"<url><loc>{SITE_URL}/job/{r['id']}/{slug(r['title'])}</loc>"
-        f"<lastmod>{r['created_at'][:10]}</lastmod></url>" for r in rows]
+    active_rows = [row for row in rows if row_is_public_job(row)]
+    urls = [
+        sitemap_entry(absolute_url("/"), changefreq="daily", priority="1.0"),
+        sitemap_entry(absolute_url("/services"), changefreq="monthly", priority="0.5"),
+        sitemap_entry(absolute_url("/post"), changefreq="monthly", priority="0.6"),
+    ]
+    urls.extend(
+        sitemap_entry(absolute_url(f"/jobs/{name}/"), changefreq="daily", priority="0.8")
+        for name in SEO_LANDING_PAGES
+    )
+    urls.extend(
+        sitemap_entry(absolute_url(f"/resources/{name}"), changefreq="monthly", priority="0.4")
+        for name in AFFILIATE_RESOURCE_PAGES
+    )
+    urls.extend(
+        sitemap_entry(
+            absolute_url(f"/job/{r['id']}/{slug(r['title'])}"),
+            lastmod=row_value(r, "posted_at") or row_value(r, "created_at"),
+            changefreq="weekly",
+            priority="0.7",
+        )
+        for r in active_rows
+    )
     return Response('<?xml version="1.0" encoding="UTF-8"?>'
                     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
                     + "".join(urls) + "</urlset>",
@@ -1058,7 +1922,7 @@ def feed():
     rows = db.execute(
         f"SELECT * FROM jobs WHERE {where} ORDER BY created_at DESC LIMIT 30"
     ).fetchall()
-    rows = [row for row in rows if not row_looks_accidentally_merged(row)]
+    rows = [row for row in rows if row_is_public_job(row)]
     items = "".join(
         f"<item><title>{escape(r['title'])} — {escape(r['company'])}</title>"
         f"<link>{SITE_URL}/job/{r['id']}/{slug(r['title'])}</link>"
@@ -1075,8 +1939,19 @@ def feed():
 
 @app.route("/robots.txt")
 def robots():
-    return Response(f"User-agent: *\nAllow: /\nSitemap: {SITE_URL}/sitemap.xml",
-                    mimetype="text/plain")
+    body = "\n".join([
+        "User-agent: *",
+        "Allow: /",
+        "Disallow: /admin/",
+        "Disallow: /account",
+        "Disallow: /login",
+        "Disallow: /register",
+        "Disallow: /affiliate/",
+        "Disallow: /alerts/",
+        f"Sitemap: {SITE_URL}/sitemap.xml",
+        "",
+    ])
+    return Response(body, mimetype="text/plain")
 
 
 @app.route("/sw.js")
@@ -1185,6 +2060,9 @@ except Exception as exc:
     raise
 
 # ---------------------- user & admin modules ------------------------
+if __name__ == "__main__":
+    sys.modules.setdefault("app", sys.modules[__name__])
+
 from auth import auth_bp, init_auth_db   # noqa: E402
 from admin import admin_bp               # noqa: E402
 

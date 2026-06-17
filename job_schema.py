@@ -100,6 +100,7 @@ def build_job_posting_json_ld(
         "title": title,
         "description": description,
         "datePosted": date_posted,
+        "directApply": False,
         "hiringOrganization": {
             "@type": "Organization",
             "name": "confidential" if company.lower() == "confidential" else company,

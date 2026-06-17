@@ -1,0 +1,38 @@
+{% macro alert_cta(source="site", category="", location="", title="Get job alerts") %}
+<section class="card alert-cta" aria-labelledby="alerts-{{ source }}">
+  <div>
+    <span class="badge blue">Alerts</span>
+    <h2 id="alerts-{{ source }}">{{ title }}</h2>
+    <p>Get fresh matching jobs by email{% if whatsapp_channel_url %} or WhatsApp{% endif %}.</p>
+  </div>
+  <div class="alert-actions">
+    {% if whatsapp_channel_url %}
+    <a class="btn wa-share" href="{{ whatsapp_channel_url }}"
+       rel="nofollow noopener" target="_blank"
+       data-track-event="whatsapp_channel_join_click"
+       data-track-source="{{ source }}"
+       data-track-category="{{ category }}"
+       data-track-location="{{ location }}">Join WhatsApp alerts</a>
+    {% endif %}
+    <form method="post" action="/alerts/email" class="alert-form"
+          data-track-event="email_alert_signup"
+          data-track-status="attempt"
+          data-track-source="{{ source }}"
+          data-track-category="{{ category }}"
+          data-track-location="{{ location }}">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+      <input type="hidden" name="source" value="{{ source }}">
+      <input type="hidden" name="category" value="{{ category }}">
+      <input type="hidden" name="location" value="{{ location }}">
+      <label>
+        <span>Email</span>
+        <input name="email" type="email" autocomplete="email"
+               value="{{ current_user['email'] if current_user else '' }}"
+               placeholder="you@example.com" required>
+      </label>
+      <button class="btn ghost" type="submit">Email me jobs</button>
+    </form>
+  </div>
+</section>
+{% endmacro %}

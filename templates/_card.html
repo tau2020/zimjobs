@@ -29,7 +29,15 @@
     <div class="card-actions">
       {% if current_user %}
       <form method="post" class="inline-form"
-            action="/job/{{ j['id'] }}/{{ 'unsave' if is_saved(j['id']) else 'save' }}">
+            action="/job/{{ j['id'] }}/{{ 'unsave' if is_saved(j['id']) else 'save' }}"
+            data-track-event="save_job"
+            data-track-job-id="{{ j['id'] }}"
+            data-track-job-title="{{ j['title'] }}"
+            data-track-category="{{ j['category'] }}"
+            data-track-location="{{ j['location'] }}"
+            data-track-company="{{ j['company'] }}"
+            data-track-source="job_card"
+            data-track-action="{{ 'unsave' if is_saved(j['id']) else 'save' }}">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <button class="iconbtn{{ ' on' if is_saved(j['id']) }}" type="submit"
                 aria-label="{{ 'Remove bookmark' if is_saved(j['id']) else 'Save job' }}"
@@ -39,7 +47,14 @@
       {% endif %}
       <a class="btn sm ghost" href="/job/{{ j['id'] }}/{{ j['title']|slug }}">View</a>
       {% if apply_url %}
-      <a class="btn sm" href="{{ apply_url }}" rel="nofollow noopener" target="_blank">Apply</a>
+      <a class="btn sm" href="{{ apply_url }}" rel="nofollow noopener" target="_blank"
+         data-track-event="apply_click_out"
+         data-track-job-id="{{ j['id'] }}"
+         data-track-job-title="{{ j['title'] }}"
+         data-track-category="{{ j['category'] }}"
+         data-track-location="{{ j['location'] }}"
+         data-track-company="{{ j['company'] }}"
+         data-track-source="job_card">Apply</a>
       {% endif %}
     </div>
   </div>
