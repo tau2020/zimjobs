@@ -1,4 +1,4 @@
-import asyncio, hmac, json, logging, os, re, sqlite3, sys, threading, time
+import asyncio, hmac, json, logging, os, re, secrets, sqlite3, sys, threading, time
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from math import ceil
@@ -74,6 +74,7 @@ AFFILIATE_DISCLOSURE = (
     "we may earn a commission at no extra cost to you."
 )
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+ALERT_FREQUENCIES = {"instant", "daily", "weekly"}
 
 CATEGORIES = ["NGO & Development", "Government", "Private Sector",
               "Remote & International", "Internships", "Gigs"]
@@ -655,11 +656,43 @@ def init_db():
         category TEXT DEFAULT '',
         location TEXT DEFAULT '',
         source TEXT DEFAULT '',
+        frequency TEXT NOT NULL DEFAULT 'instant',
+        active INTEGER NOT NULL DEFAULT 1,
+        unsubscribe_token TEXT,
+        last_sent_at TEXT,
+        last_error TEXT,
+        delivery_failures INTEGER NOT NULL DEFAULT 0,
+        unsubscribed_at TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')))""")
+    existing_alert_cols = {r[1] for r in db.execute("PRAGMA table_info(email_alerts)").fetchall()}
+    alert_columns = {
+        "frequency": "TEXT NOT NULL DEFAULT 'instant'",
+        "active": "INTEGER NOT NULL DEFAULT 1",
+        "unsubscribe_token": "TEXT",
+        "last_sent_at": "TEXT",
+        "last_error": "TEXT",
+        "delivery_failures": "INTEGER NOT NULL DEFAULT 0",
+        "unsubscribed_at": "TEXT",
+    }
+    for col, sql_type in alert_columns.items():
+        if col not in existing_alert_cols:
+            db.execute(f"ALTER TABLE email_alerts ADD COLUMN {col} {sql_type}")
     db.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_email_alerts_unique "
         "ON email_alerts(email, category, location)")
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_email_alerts_unsubscribe_token "
+        "ON email_alerts(unsubscribe_token) "
+        "WHERE unsubscribe_token IS NOT NULL AND unsubscribe_token <> ''")
+    missing_tokens = db.execute(
+        "SELECT id FROM email_alerts WHERE unsubscribe_token IS NULL OR unsubscribe_token=''"
+    ).fetchall()
+    for row in missing_tokens:
+        db.execute(
+            "UPDATE email_alerts SET unsubscribe_token=? WHERE id=?",
+            (secrets.token_urlsafe(24), row["id"] if isinstance(row, sqlite3.Row) else row[0]),
+        )
 
     if db.execute("SELECT COUNT(*) FROM affiliate_offers").fetchone()[0] == 0:
         seed_affiliate_offers(db)
@@ -926,6 +959,38 @@ def fts_match(q):
     return " ".join(f'"{t}"*' for t in tokens)
 
 
+def job_filter_clauses(cols, cat="", jtype="", work="", exp="", loc=""):
+    clauses = [active_jobs_where_sql(cols, "jobs")]
+    args = []
+    if cat:
+        clauses.append("jobs.category = ?")
+        args.append(cat)
+    if jtype and "employment_type" in cols:
+        clauses.append("jobs.employment_type = ?")
+        args.append(jtype)
+    if work and "remote_status" in cols:
+        clauses.append("jobs.remote_status = ?")
+        args.append(work)
+    if exp and "experience_level" in cols:
+        clauses.append("jobs.experience_level = ?")
+        args.append(exp)
+    if loc:
+        clauses.append("jobs.location LIKE ?")
+        args.append(f"%{loc}%")
+    return clauses, args
+
+
+def job_like_search_clauses(q):
+    terms = re.findall(r"\w+", q)[:6]
+    clauses = []
+    args = []
+    fields = ("jobs.title", "jobs.company", "jobs.summary", "jobs.location")
+    for term in terms:
+        clauses.append("(" + " OR ".join(f"{field} LIKE ?" for field in fields) + ")")
+        args.extend([f"%{term}%"] * len(fields))
+    return clauses, args
+
+
 def clean_control_chars(value):
     return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", " ", str(value or ""))
 
@@ -1127,20 +1192,43 @@ def send_welcome_email(email, name=""):
     )
 
 
-def send_email_alert_confirmation(email, category="", location=""):
+def clean_alert_frequency(value):
+    value = clean_inline_job_text(value or "instant").lower()
+    return value if value in ALERT_FREQUENCIES else "instant"
+
+
+def new_unsubscribe_token():
+    return secrets.token_urlsafe(24)
+
+
+def alert_unsubscribe_url(token):
+    return absolute_url(url_for("email_alert_unsubscribe", token=token)) if token else ""
+
+
+def send_email_alert_confirmation(email, category="", location="", unsubscribe_token=""):
     parts = [part for part in (category, location) if part]
     label = " for " + " in ".join(parts) if parts else ""
+    if not unsubscribe_token and has_request_context():
+        row = get_db().execute(
+            """SELECT unsubscribe_token FROM email_alerts
+               WHERE email=? AND category=? AND location=?""",
+            (email, category, location),
+        ).fetchone()
+        unsubscribe_token = row["unsubscribe_token"] if row else ""
+    unsubscribe_url = alert_unsubscribe_url(unsubscribe_token)
     subject = "Your ZimJobs Hub job alerts are active"
     text = (
         f"Your ZimJobs Hub email job alerts{label} are active.\n\n"
         "We will use this address for job alert updates as the alert feature grows.\n"
-        f"Browse current jobs: {absolute_url('/')}\n\n"
-        "If you did not request this, you can ignore this email."
+        f"Browse current jobs: {absolute_url('/')}\n"
+        + (f"Unsubscribe: {unsubscribe_url}\n\n" if unsubscribe_url else "\n")
+        + "If you did not request this, you can ignore this email."
     )
     html = (
         f"<p>Your ZimJobs Hub email job alerts{escape(label)} are active.</p>"
         "<p>We will use this address for job alert updates as the alert feature grows.</p>"
         + email_button("Browse current jobs", absolute_url("/"))
+        + (f'<p><a href="{escape(unsubscribe_url)}">Unsubscribe from these alerts</a></p>' if unsubscribe_url else "")
         + "<p>If you did not request this, you can ignore this email.</p>"
     )
     return send_transactional_email(
@@ -1803,36 +1891,25 @@ def index():
     db    = get_db()
     cols  = job_columns(db)
 
-    if q and fts_match(q):
+    fts_query = fts_match(q) if q else ""
+    filter_clauses, filter_args = job_filter_clauses(cols, cat, jtype, work, exp, loc)
+    using_fts = bool(fts_query)
+    if using_fts:
         base = ("FROM jobs JOIN jobs_fts ON jobs.id = jobs_fts.rowid "
                 "WHERE jobs_fts MATCH ?")
-        args = [fts_match(q)]
+        args = [fts_query]
     else:
         base, args = "FROM jobs WHERE 1=1", []
-    base += f" AND {active_jobs_where_sql(cols, 'jobs')}"
-    if cat:
-        base += " AND category = ?"
-        args.append(cat)
-    if jtype and "employment_type" in cols:
-        base += " AND employment_type = ?"
-        args.append(jtype)
-    if work and "remote_status" in cols:
-        base += " AND remote_status = ?"
-        args.append(work)
-    if exp and "experience_level" in cols:
-        base += " AND experience_level = ?"
-        args.append(exp)
-    if loc:
-        base += " AND location LIKE ?"
-        args.append(f"%{loc}%")
+    base += " AND " + " AND ".join(filter_clauses)
+    args += filter_args
 
     if sort == "newest":
-        order = "created_at DESC"
+        order = "jobs.created_at DESC"
     elif sort == "deadline" and "expires_at" in cols:
-        order = ("(expires_at IS NULL OR TRIM(expires_at)='') ASC, "
-                 "expires_at ASC, created_at DESC")
+        order = ("(jobs.expires_at IS NULL OR TRIM(jobs.expires_at)='') ASC, "
+                 "jobs.expires_at ASC, jobs.created_at DESC")
     else:
-        order = "featured DESC, created_at DESC"
+        order = "jobs.featured DESC, jobs.created_at DESC"
 
     try:
         total = db.execute("SELECT COUNT(*) c " + base, args).fetchone()["c"]
@@ -1842,15 +1919,46 @@ def index():
             args + [PER_PAGE, (page - 1) * PER_PAGE]).fetchall()
         jobs = [job for job in jobs if row_is_public_job(job)]
     except sqlite3.OperationalError as exc:
-        log_event(
-            logging.ERROR,
-            "jobs_query_failed",
-            error=error_snapshot(exc),
-            request=request_context_snapshot(),
-            query={"base": base, "args_count": len(args), "sort": sort},
-            config=runtime_config_snapshot(),
-        )
-        total, jobs = 0, []
+        if not using_fts:
+            log_event(
+                logging.ERROR,
+                "jobs_query_failed",
+                error=error_snapshot(exc),
+                request=request_context_snapshot(),
+                query={"base": base, "args_count": len(args), "sort": sort},
+                config=runtime_config_snapshot(),
+            )
+            total, jobs = 0, []
+        else:
+            log_event(
+                logging.WARNING,
+                "jobs_fts_fallback",
+                error=error_snapshot(exc),
+                request=request_context_snapshot(),
+                query={"args_count": len(args), "sort": sort},
+            )
+            like_clauses, like_args = job_like_search_clauses(q)
+            fallback_clauses = filter_clauses + like_clauses
+            fallback_args = filter_args + like_args
+            fallback_base = "FROM jobs WHERE " + " AND ".join(fallback_clauses)
+            try:
+                total = db.execute("SELECT COUNT(*) c " + fallback_base, fallback_args).fetchone()["c"]
+                jobs = db.execute(
+                    "SELECT jobs.* " + fallback_base +
+                    f" ORDER BY {order} LIMIT ? OFFSET ?",
+                    fallback_args + [PER_PAGE, (page - 1) * PER_PAGE],
+                ).fetchall()
+                jobs = [job for job in jobs if row_is_public_job(job)]
+            except sqlite3.OperationalError as fallback_exc:
+                log_event(
+                    logging.ERROR,
+                    "jobs_query_failed",
+                    error=error_snapshot(fallback_exc),
+                    request=request_context_snapshot(),
+                    query={"base": fallback_base, "args_count": len(fallback_args), "sort": sort},
+                    config=runtime_config_snapshot(),
+                )
+                total, jobs = 0, []
 
     filters = {"q": q, "cat": cat, "type": jtype, "remote": work,
                "exp": exp, "loc": loc, "sort": sort}
@@ -1973,24 +2081,54 @@ def email_alert_signup():
     category = clean_inline_job_text(request.form.get("category", ""))[:80]
     location = clean_inline_job_text(request.form.get("location", ""))[:80]
     source = clean_inline_job_text(request.form.get("source", "unknown"))[:80]
+    frequency = clean_alert_frequency(request.form.get("frequency", "instant"))
     target = safe_form_next(url_for("index"))
 
     if len(email) > 254 or not EMAIL_RE.match(email):
         flash("Enter a valid email address for job alerts.")
         return redirect(url_with_query_param(target, "email_alert", "error"))
 
+    unsubscribe_token = new_unsubscribe_token()
     db = get_db()
     db.execute(
-        """INSERT INTO email_alerts(email, category, location, source)
-           VALUES(?,?,?,?)
+        """INSERT INTO email_alerts(
+                email, category, location, source, frequency, active,
+                unsubscribe_token, unsubscribed_at, delivery_failures, last_error
+           )
+           VALUES(?,?,?,?,?,1,?,NULL,0,NULL)
            ON CONFLICT(email, category, location)
-           DO UPDATE SET source=excluded.source, updated_at=datetime('now')""",
-        (email, category, location, source),
+           DO UPDATE SET source=excluded.source,
+                         frequency=excluded.frequency,
+                         active=1,
+                         unsubscribed_at=NULL,
+                         last_error=NULL,
+                         updated_at=datetime('now')""",
+        (email, category, location, source, frequency, unsubscribe_token),
     )
     db.commit()
     send_email_alert_confirmation(email, category, location)
     flash("Email job alerts enabled.")
     return redirect(url_with_query_param(target, "email_alert", "success"))
+
+
+@app.route("/alerts/email/unsubscribe/<token>")
+def email_alert_unsubscribe(token):
+    token = clean_inline_job_text(token)
+    if len(token) < 20 or len(token) > 128:
+        abort(404)
+    db = get_db()
+    cur = db.execute(
+        """UPDATE email_alerts
+           SET active=0, unsubscribed_at=datetime('now'), updated_at=datetime('now')
+           WHERE unsubscribe_token=? AND active=1""",
+        (token,),
+    )
+    db.commit()
+    if cur.rowcount == 0:
+        flash("This alert is already inactive or the link is invalid.")
+    else:
+        flash("Email job alerts unsubscribed.")
+    return redirect(url_for("index"))
 
 
 @app.route("/affiliate/click/<int:offer_id>")

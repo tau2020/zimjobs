@@ -57,6 +57,22 @@ ADMIN_EMAIL="admin@yourdomain.com"
 sender/domain in Resend before production sending. Set
 `TRANSACTIONAL_EMAILS_ENABLED=0` to temporarily disable email sends.
 
+Email alert signups are stored locally in SQLite with frequency, active status,
+unsubscribe token, last-send metadata, and delivery-failure fields. Existing
+rows are migrated additively on startup. The current implementation does not
+run weekly digest campaigns yet; see `docs/tooling-decision-note.md` before
+adding Listmonk or another campaign service.
+
+Unsubscribe links use:
+
+```text
+/alerts/email/unsubscribe/<token>
+```
+
+Search uses SQLite FTS5 with a LIKE fallback if the FTS table/query fails.
+Meilisearch or Typesense should be added only after measured search relevance
+or latency issues justify a separate service.
+
 ---
 
 ## Safe Manual Update Command

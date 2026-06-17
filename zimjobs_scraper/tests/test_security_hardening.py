@@ -174,6 +174,84 @@ def test_resend_sender_posts_expected_transactional_payload(tmp_path, monkeypatc
     assert calls[0]["json"]["tags"] == [{"name": "type", "value": "test_email"}]
 
 
+def test_email_alert_signup_stores_preferences_and_unsubscribe_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRANSACTIONAL_EMAILS_ENABLED", "0")
+    web_app = import_web_app(tmp_path, monkeypatch)
+    client = web_app.app.test_client()
+    token = csrf_token(client.get("/").get_data(as_text=True))
+
+    response = client.post(
+        "/alerts/email",
+        data={
+            "_csrf": token,
+            "email": "reader@example.com",
+            "category": "Private Sector",
+            "location": "Harare",
+            "source": "test",
+            "frequency": "weekly",
+        },
+    )
+
+    assert response.status_code == 302
+    with web_app.app.app_context():
+        row = web_app.get_db().execute(
+            "SELECT email, category, location, source, frequency, active, unsubscribe_token "
+            "FROM email_alerts WHERE email=?",
+            ("reader@example.com",),
+        ).fetchone()
+
+    assert row["category"] == "Private Sector"
+    assert row["location"] == "Harare"
+    assert row["source"] == "test"
+    assert row["frequency"] == "weekly"
+    assert row["active"] == 1
+    assert len(row["unsubscribe_token"]) >= 20
+
+
+def test_email_alert_unsubscribe_deactivates_alert(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRANSACTIONAL_EMAILS_ENABLED", "0")
+    web_app = import_web_app(tmp_path, monkeypatch)
+    client = web_app.app.test_client()
+    csrf = csrf_token(client.get("/").get_data(as_text=True))
+    client.post(
+        "/alerts/email",
+        data={"_csrf": csrf, "email": "reader@example.com"},
+    )
+
+    with web_app.app.app_context():
+        token = web_app.get_db().execute(
+            "SELECT unsubscribe_token FROM email_alerts WHERE email=?",
+            ("reader@example.com",),
+        ).fetchone()["unsubscribe_token"]
+
+    response = client.get(f"/alerts/email/unsubscribe/{token}")
+
+    assert response.status_code == 302
+    with web_app.app.app_context():
+        row = web_app.get_db().execute(
+            "SELECT active, unsubscribed_at FROM email_alerts WHERE email=?",
+            ("reader@example.com",),
+        ).fetchone()
+
+    assert row["active"] == 0
+    assert row["unsubscribed_at"]
+
+
+def test_search_falls_back_to_like_when_fts_query_fails(tmp_path, monkeypatch):
+    web_app = import_web_app(tmp_path, monkeypatch)
+    insert_job(web_app, title="Finance Officer")
+    with web_app.app.app_context():
+        web_app.get_db().execute("DROP TABLE jobs_fts")
+        web_app.get_db().commit()
+
+    response = web_app.app.test_client().get("/?q=Finance")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Finance Officer" in html
+    assert "Server error" not in html
+
+
 def test_post_requires_csrf_even_with_valid_form_token(tmp_path, monkeypatch):
     web_app = import_web_app(tmp_path, monkeypatch)
     client = web_app.app.test_client()

@@ -96,6 +96,38 @@
     "notes": "Job details use /jobs/{slug}-{id}/. Archive and account pages should not be parsed as jobs."
   },
   {
+    "name": "alljobspo_zimbabwe",
+    "type": "generic",
+    "enabled": true,
+    "start_urls": [
+      "https://jobsinzimbabwe.alljobspo.com/"
+    ],
+    "max_pages": 3,
+    "max_detail_pages": 40,
+    "default_location": "Zimbabwe",
+    "default_category": "Private Sector",
+    "allowed_locations": ["Zimbabwe", "Harare", "Bulawayo", "Mutare", "Gweru", "Remote", "Africa"],
+    "legal_status": "Public job aggregator; verify robots.txt and original-source attribution before high-volume crawling.",
+    "skip_expired": true,
+    "site_type": "job_board",
+    "pagination_strategy": "auto",
+    "include_url_patterns": [
+      "^https://jobsinzimbabwe\\.alljobspo\\.com/job-details/\\d+/?$"
+    ],
+    "exclude_url_patterns": [
+      "/post-job",
+      "/job-test",
+      "/cover-letter",
+      "/resume",
+      "/privacy",
+      "/terms",
+      "/contact",
+      "telegram",
+      "mailto:"
+    ],
+    "notes": "Listing page exposes /job-details/{id} links and pagination links. Keep page/detail limits conservative because this is an aggregator."
+  },
+  {
     "name": "iharare_jobs",
     "type": "generic",
     "enabled": true,
@@ -150,6 +182,33 @@
     "allowed_locations": ["Zimbabwe", "Harare", "Remote", "Africa", "Home Based"],
     "legal_status": "Public aggregator; prefer original UN/agency application URLs and link attribution.",
     "skip_expired": true
+  },
+  {
+    "name": "cvpeopleafrica_zimbabwe",
+    "type": "generic",
+    "enabled": false,
+    "start_urls": [
+      "https://www.cvpeopleafrica.com/country/zimbabwe"
+    ],
+    "max_pages": 1,
+    "max_detail_pages": 30,
+    "default_location": "Zimbabwe",
+    "default_category": "Private Sector",
+    "default_company": "CV People Africa",
+    "allowed_locations": ["Zimbabwe", "Harare", "Bulawayo", "Remote", "Africa"],
+    "legal_status": "JavaScript app and partner/API review recommended before automated collection.",
+    "skip_expired": true,
+    "site_type": "job_board_spa",
+    "pagination_strategy": "none",
+    "exclude_url_patterns": [
+      "/login",
+      "/register",
+      "/candidate",
+      "/employer",
+      "/privacy",
+      "/terms"
+    ],
+    "notes": "Added as a tracked source URL but disabled because the public page is a JavaScript app and existing review notes recommend partner/API permission before scraping."
   },
   {
     "name": "zimplats_careers",
