@@ -287,6 +287,12 @@ def test_job_detail_has_growth_tracking_hooks_and_sticky_apply(tmp_path, monkeyp
 
 def test_email_alert_signup_persists_subscription(tmp_path, monkeypatch):
     web_app = import_web_app(tmp_path, monkeypatch)
+    sent = []
+    monkeypatch.setattr(
+        web_app,
+        "send_email_alert_confirmation",
+        lambda email, category="", location="": sent.append((email, category, location)) or True,
+    )
     client = web_app.app.test_client()
     page = client.get("/jobs/harare/")
     soup = BeautifulSoup(page.get_data(as_text=True), "html.parser")
@@ -312,6 +318,7 @@ def test_email_alert_signup_persists_subscription(tmp_path, monkeypatch):
     assert row["category"] == "NGO & Development"
     assert row["location"] == "Harare"
     assert row["source"] == "landing_harare"
+    assert sent == [("reader@example.com", "NGO & Development", "Harare")]
 
 
 def test_homepage_filterbar_is_not_rendered(tmp_path, monkeypatch):

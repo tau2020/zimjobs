@@ -6,7 +6,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 from app import (get_db, DB_PATH, ADMIN_TOKEN, CATEGORIES,
                  safe_redirect_target, clean_control_chars, log_event,
-                 request_context_snapshot, select_affiliate_offers)
+                 request_context_snapshot, select_affiliate_offers,
+                 send_welcome_email)
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -152,6 +153,7 @@ def register():
                 session.clear()
                 session.permanent = True
                 session["uid"] = cur.lastrowid
+                send_welcome_email(email, name)
                 flash("Welcome to ZimJobs Hub!")
                 return redirect(url_for("auth.account"))
             except sqlite3.IntegrityError:

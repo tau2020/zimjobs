@@ -126,6 +126,54 @@ def test_unsafe_apply_url_is_not_rendered_as_link(tmp_path, monkeypatch):
     assert "invalid apply link" in html
 
 
+def test_resend_sender_posts_expected_transactional_payload(tmp_path, monkeypatch):
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("RESEND_FROM_EMAIL", "ZimJobs Hub <jobs@example.com>")
+    monkeypatch.setenv("RESEND_REPLY_TO", "support@example.com")
+    web_app = import_web_app(tmp_path, monkeypatch)
+    calls = []
+
+    class Response:
+        status_code = 200
+        text = '{"id":"email_123"}'
+
+        def json(self):
+            return {"id": "email_123"}
+
+    def fake_post(url, json, headers, timeout):
+        calls.append({
+            "url": url,
+            "json": json,
+            "headers": headers,
+            "timeout": timeout,
+        })
+        return Response()
+
+    monkeypatch.setattr(web_app.requests, "post", fake_post)
+
+    sent = web_app.send_transactional_email(
+        "reader@example.com",
+        "Test subject",
+        "Plain text",
+        "<p>HTML</p>",
+        tags={"type": "test_email"},
+        idempotency_key="test email/1",
+    )
+
+    assert sent is True
+    assert calls[0]["url"] == "https://api.resend.com/emails"
+    assert calls[0]["headers"]["Authorization"] == "Bearer re_test_key"
+    assert calls[0]["headers"]["Idempotency-Key"] == "test_email_1"
+    assert calls[0]["timeout"] == 10
+    assert calls[0]["json"]["from"] == "ZimJobs Hub <jobs@example.com>"
+    assert calls[0]["json"]["to"] == ["reader@example.com"]
+    assert calls[0]["json"]["subject"] == "Test subject"
+    assert calls[0]["json"]["text"] == "Plain text"
+    assert calls[0]["json"]["html"] == "<p>HTML</p>"
+    assert calls[0]["json"]["reply_to"] == "support@example.com"
+    assert calls[0]["json"]["tags"] == [{"name": "type", "value": "test_email"}]
+
+
 def test_post_requires_csrf_even_with_valid_form_token(tmp_path, monkeypatch):
     web_app = import_web_app(tmp_path, monkeypatch)
     client = web_app.app.test_client()

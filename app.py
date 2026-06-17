@@ -5,6 +5,7 @@ from math import ceil
 from traceback import format_exception
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
+import requests
 from flask import (Flask, g, request, render_template, abort,
                    Response, redirect, url_for, has_request_context, flash)
 from flask_compress import Compress
@@ -58,6 +59,15 @@ SITE_CONFIG = {
     "default_country_code": "ZW",
     "default_remote_applicant_country": "Zimbabwe",
 }
+RESEND_API_URL = os.environ.get("RESEND_API_URL", "https://api.resend.com/emails").strip()
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "").strip()
+RESEND_FROM_EMAIL = (
+    os.environ.get("RESEND_FROM_EMAIL")
+    or os.environ.get("EMAIL_FROM")
+    or "ZimJobs Hub <onboarding@resend.dev>"
+).strip()
+RESEND_REPLY_TO = os.environ.get("RESEND_REPLY_TO", "").strip()
+TRANSACTIONAL_EMAILS_ENABLED = os.environ.get("TRANSACTIONAL_EMAILS_ENABLED", "1") != "0"
 WHATSAPP_CHANNEL_URL = os.environ.get("WHATSAPP_CHANNEL_URL", "").strip()
 AFFILIATE_DISCLOSURE = (
     "This page may contain affiliate links. If you purchase through these links, "
@@ -335,6 +345,9 @@ def runtime_config_snapshot():
         "admin_token_uses_default": ADMIN_TOKEN == "change-me",
         "admin_email_set": bool(os.environ.get("ADMIN_EMAIL")),
         "admin_password_set": bool(os.environ.get("ADMIN_PASSWORD")),
+        "resend_api_key_set": bool(RESEND_API_KEY),
+        "transactional_emails_enabled": TRANSACTIONAL_EMAILS_ENABLED,
+        "resend_from_email_set": bool(RESEND_FROM_EMAIL),
         "enable_scraper_cron": os.environ.get("ENABLE_SCRAPER_CRON"),
         "scraper_cron_schedule_set": bool(os.environ.get("SCRAPER_CRON_SCHEDULE")),
         "python_version": sys.version.split()[0],
@@ -976,6 +989,201 @@ def safe_redirect_target(target, fallback):
     if not target.startswith("/") or target.startswith("//") or parts.scheme or parts.netloc:
         return fallback
     return target
+
+
+def email_hash(email):
+    import hashlib
+    return hashlib.sha256(str(email or "").lower().encode("utf-8")).hexdigest()[:12]
+
+
+def normalize_recipients(to):
+    recipients = [to] if isinstance(to, str) else list(to or [])
+    cleaned = []
+    for recipient in recipients[:50]:
+        email = clean_inline_job_text(recipient).lower()
+        if EMAIL_RE.match(email):
+            cleaned.append(email)
+    return cleaned
+
+
+def resend_tag(name, value):
+    name = re.sub(r"[^A-Za-z0-9_-]+", "_", str(name or ""))[:256].strip("_")
+    value = re.sub(r"[^A-Za-z0-9_-]+", "_", str(value or ""))[:256].strip("_")
+    return {"name": name or "type", "value": value or "unknown"}
+
+
+def send_transactional_email(to, subject, text, html="", tags=None,
+                             idempotency_key=""):
+    recipients = normalize_recipients(to)
+    if not recipients:
+        log_event(logging.WARNING, "email_skipped", reason="invalid_recipient")
+        return False
+    if not TRANSACTIONAL_EMAILS_ENABLED:
+        log_event(logging.INFO, "email_skipped", reason="disabled",
+                  recipient_hashes=[email_hash(r) for r in recipients])
+        return False
+    if not RESEND_API_KEY:
+        log_event(logging.INFO, "email_skipped", reason="resend_not_configured",
+                  recipient_hashes=[email_hash(r) for r in recipients])
+        return False
+
+    payload = {
+        "from": RESEND_FROM_EMAIL,
+        "to": recipients,
+        "subject": clean_inline_job_text(subject)[:998],
+        "text": str(text or "").strip(),
+    }
+    if html:
+        payload["html"] = str(html)
+    if RESEND_REPLY_TO:
+        payload["reply_to"] = RESEND_REPLY_TO
+    if tags:
+        payload["tags"] = [resend_tag(k, v) for k, v in tags.items()]
+
+    headers = {
+        "Authorization": f"Bearer {RESEND_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    if idempotency_key:
+        headers["Idempotency-Key"] = re.sub(
+            r"[^A-Za-z0-9:_-]+",
+            "_",
+            clean_inline_job_text(idempotency_key),
+        )[:256]
+
+    try:
+        response = requests.post(
+            RESEND_API_URL,
+            json=payload,
+            headers=headers,
+            timeout=10,
+        )
+    except requests.RequestException as exc:
+        log_event(
+            logging.WARNING,
+            "email_send_failed",
+            provider="resend",
+            error=error_snapshot(exc),
+            recipient_hashes=[email_hash(r) for r in recipients],
+        )
+        return False
+
+    if not 200 <= response.status_code < 300:
+        log_event(
+            logging.WARNING,
+            "email_send_rejected",
+            provider="resend",
+            status_code=response.status_code,
+            response=truncate(response.text, 500),
+            recipient_hashes=[email_hash(r) for r in recipients],
+        )
+        return False
+
+    message_id = ""
+    try:
+        message_id = (response.json() or {}).get("id", "")
+    except ValueError:
+        pass
+    log_event(
+        logging.INFO,
+        "email_sent",
+        provider="resend",
+        message_id=message_id,
+        recipient_hashes=[email_hash(r) for r in recipients],
+        tags=tags or {},
+    )
+    return True
+
+
+def email_button(label, href):
+    return (
+        '<p><a href="' + escape(href) + '" '
+        'style="display:inline-block;background:#0F766E;color:#fff;'
+        'padding:10px 16px;border-radius:8px;text-decoration:none;'
+        'font-weight:700">' + escape(label) + "</a></p>"
+    )
+
+
+def send_welcome_email(email, name=""):
+    first_name = clean_inline_job_text(name).split(" ", 1)[0] or "there"
+    subject = "Welcome to ZimJobs Hub"
+    text = (
+        f"Hi {first_name},\n\n"
+        "Welcome to ZimJobs Hub. You can now save jobs and manage your profile.\n\n"
+        f"Browse jobs: {absolute_url('/')}\n"
+    )
+    html = (
+        f"<p>Hi {escape(first_name)},</p>"
+        "<p>Welcome to ZimJobs Hub. You can now save jobs and manage your profile.</p>"
+        + email_button("Browse jobs", absolute_url("/"))
+    )
+    return send_transactional_email(
+        email,
+        subject,
+        text,
+        html,
+        tags={"type": "welcome"},
+        idempotency_key=f"welcome:{email_hash(email)}",
+    )
+
+
+def send_email_alert_confirmation(email, category="", location=""):
+    parts = [part for part in (category, location) if part]
+    label = " for " + " in ".join(parts) if parts else ""
+    subject = "Your ZimJobs Hub job alerts are active"
+    text = (
+        f"Your ZimJobs Hub email job alerts{label} are active.\n\n"
+        "We will use this address for job alert updates as the alert feature grows.\n"
+        f"Browse current jobs: {absolute_url('/')}\n\n"
+        "If you did not request this, you can ignore this email."
+    )
+    html = (
+        f"<p>Your ZimJobs Hub email job alerts{escape(label)} are active.</p>"
+        "<p>We will use this address for job alert updates as the alert feature grows.</p>"
+        + email_button("Browse current jobs", absolute_url("/"))
+        + "<p>If you did not request this, you can ignore this email.</p>"
+    )
+    return send_transactional_email(
+        email,
+        subject,
+        text,
+        html,
+        tags={"type": "email_alert", "category": category or "all"},
+        idempotency_key=f"email_alert:{email_hash(email)}:{category}:{location}",
+    )
+
+
+def send_job_published_email(job_id, values):
+    admin_email = clean_inline_job_text(os.environ.get("ADMIN_EMAIL", "")).lower()
+    if not EMAIL_RE.match(admin_email):
+        return False
+    title = clean_inline_job_text(values.get("title", "New job"))
+    company = clean_inline_job_text(values.get("company", ""))
+    location = clean_inline_job_text(values.get("location", ""))
+    job_url = absolute_url(f"/job/{job_id}/{slug(title)}")
+    subject = f"Job published: {title[:120]}"
+    text = (
+        f"A job has been published on ZimJobs Hub.\n\n"
+        f"Title: {title}\nCompany: {company}\nLocation: {location}\n"
+        f"View: {job_url}\n"
+    )
+    html = (
+        "<p>A job has been published on ZimJobs Hub.</p>"
+        "<ul>"
+        f"<li><strong>Title:</strong> {escape(title)}</li>"
+        f"<li><strong>Company:</strong> {escape(company)}</li>"
+        f"<li><strong>Location:</strong> {escape(location)}</li>"
+        "</ul>"
+        + email_button("View job", job_url)
+    )
+    return send_transactional_email(
+        admin_email,
+        subject,
+        text,
+        html,
+        tags={"type": "job_published", "category": values.get("category", "")},
+        idempotency_key=f"job_published:{job_id}",
+    )
 
 
 def is_safe_public_url(url):
@@ -1780,6 +1988,7 @@ def email_alert_signup():
         (email, category, location, source),
     )
     db.commit()
+    send_email_alert_confirmation(email, category, location)
     flash("Email job alerts enabled.")
     return redirect(url_with_query_param(target, "email_alert", "success"))
 
@@ -1838,7 +2047,8 @@ def post():
     """Form for you/recruiters + token-protected API for your scraper."""
     error = None
     if request.method == "POST":
-        if not valid_admin_token(request.headers.get("X-Admin-Token")):
+        api_token_valid = valid_admin_token(request.headers.get("X-Admin-Token"))
+        if not api_token_valid:
             from auth import check_csrf
             check_csrf()
         f = request.form
@@ -1861,10 +2071,12 @@ def post():
             cols = list(core) + ["featured"] + list(opt.keys())
             vals = [cleaned_core[k] for k in core] + \
                    [1 if f.get("featured") else 0] + list(opt.values())
-            db.execute(
+            cur = db.execute(
                 f"INSERT INTO jobs({','.join(cols)}) "
                 f"VALUES({','.join('?' * len(cols))})", vals)
             db.commit()
+            if not api_token_valid:
+                send_job_published_email(cur.lastrowid, cleaned_values)
             return redirect(url_for("index"))
     return render_template("post.html", categories=CATEGORIES,
                            cat=None, q="", error=error,

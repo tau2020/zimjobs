@@ -37,6 +37,26 @@ To ensure the SQLite database is kept persistent and updated daily, configure yo
    * To disable the cron without changing the image, set `ENABLE_SCRAPER_CRON=0`.
    * Cron output is appended to `/data/scraper.log`.
 
+## Transactional Email With Resend
+
+The web app can send transactional email through Resend for account welcomes,
+email-alert confirmations, and admin job-published notifications.
+
+Configure these environment variables on Railway or in your local ignored
+secrets file:
+
+```bash
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxxx
+RESEND_FROM_EMAIL="ZimJobs Hub <jobs@yourdomain.com>"
+RESEND_REPLY_TO="support@yourdomain.com"
+ADMIN_EMAIL="admin@yourdomain.com"
+```
+
+`RESEND_API_KEY` is required to send. If it is missing, the app logs
+`email_skipped` and continues without blocking the user action. Use a verified
+sender/domain in Resend before production sending. Set
+`TRANSACTIONAL_EMAILS_ENABLED=0` to temporarily disable email sends.
+
 ---
 
 ## Safe Manual Update Command
