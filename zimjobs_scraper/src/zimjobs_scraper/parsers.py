@@ -135,7 +135,9 @@ class BaseParser:
             href = normalize_url(a["href"], base_url)
             if not href or href in seen:
                 continue
-            if re.fullmatch(r"(next|older|more|load more|>|>>|»|next page)", text, re.I) and self._looks_like_listing_url(href, base_url):
+            in_pagination = bool(a.find_parent(class_=re.compile(r"pagination|pager|page-numbers", re.I)))
+            is_page_link = in_pagination and bool(re.fullmatch(r"\d+|\.\.\.|…", text))
+            if (re.fullmatch(r"(next|older|more|load more|>|>>|»|next page)", text, re.I) or is_page_link) and self._looks_like_listing_url(href, base_url):
                 seen.add(href)
                 urls.append(href)
         return urls
@@ -216,6 +218,10 @@ class BaseParser:
             re.I,
         )
         for node in list(root.find_all(True)):
+            # A previous selector may have decomposed this node or one of its
+            # ancestors. BeautifulSoup leaves detached nodes with attrs=None.
+            if node.parent is None or node.attrs is None:
+                continue
             style = node.get("style", "")
             if style and re.search(r"display\s*:\s*none|visibility\s*:\s*hidden", style, re.I):
                 node.decompose()

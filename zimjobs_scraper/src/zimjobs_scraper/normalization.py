@@ -134,13 +134,23 @@ ROLE_KEYWORDS = (
     "supervisor", "representative", "executive", "researcher", "auditor", "cashier", "receptionist",
     "operator", "monitor", "enumerator", "facilitator", "controller", "agent", "architect", "scientist",
     "drivers", "operators", "agronomist", "mechanic", "mechanics", "apprentice", "apprenticeship",
-    "learnership", "consultants",
+    "learnership", "consultants", "guard", "guards", "salesperson", "sales", "artisan", "fitter",
+    "turner", "radiographer", "sergeant",
 )
 
 GENERIC_TITLE_RE = re.compile(
     r"^(?:jobs?\s*\|\s*somewhere|jobs?|vacanc(?:y|ies)|multiple\s+vacanc(?:y|ies)|"
     r"\d+\s+(?:new\s+)?job\s+positions?|career\s+opportunities?|open\s+positions?|"
     r"various\s+positions?|latest\s+jobs?|remote\s+jobs?|talent\s+on[- ]demand|hire\s+remote\s+professionals)\b",
+    re.I,
+)
+
+TASK_FRAGMENT_TITLE_RE = re.compile(
+    r"^(?:"
+    r"manage|monitor|examine|develop|conduct|provide|coordinate|ensure|maintain|prepare|"
+    r"assist|work|report|oversee|implement|facilitate|perform|review|analy[sz]e|deliver|"
+    r"carry\s+out"
+    r")\b",
     re.I,
 )
 
@@ -162,6 +172,10 @@ def looks_like_real_role(value: str | None) -> bool:
     if not title or GENERIC_TITLE_RE.search(title):
         return False
     if len(title) < 5 or len(title) > 120:
+        return False
+    if TASK_FRAGMENT_TITLE_RE.search(title):
+        return False
+    if re.search(r"\b(?:qualification|qualifications|required|responsible for|duties include|minimum of|experience in|such as)\b", title, re.I):
         return False
     if re.search(r"\b(?:is|are)\s+hiring\b|\bapply\s+by\b|\bdeadline\b|\bclosing\s+date\b", title, re.I):
         return False

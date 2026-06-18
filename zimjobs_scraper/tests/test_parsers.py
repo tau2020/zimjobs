@@ -160,6 +160,50 @@ def test_generic_parser_discovers_pagination_links():
     assert parser.list_pagination_urls(html, "https://example.com/jobs/") == ["https://example.com/jobs/page/2/"]
 
 
+def test_generic_parser_discovers_numeric_pagination_links_in_pagination_nav():
+    cfg = SourceConfig(name="x", type="generic", start_urls=[])
+    parser = GenericParser(cfg)
+    html = """
+    <html><body>
+      <nav class="pagination">
+        <a href="#">1</a>
+        <a href="?page=2">2</a>
+        <a href="?page=3">3</a>
+      </nav>
+    </body></html>
+    """
+    assert parser.list_pagination_urls(html, "https://vacancymail.co.zw/jobs/") == [
+        "https://vacancymail.co.zw/jobs/?page=2",
+        "https://vacancymail.co.zw/jobs/?page=3",
+    ]
+
+
+def test_generic_parser_handles_decomposed_descendants_in_noise_removal():
+    cfg = SourceConfig(name="vacancymail_zimbabwe", type="generic", start_urls=[], default_location="Zimbabwe")
+    parser = GenericParser(cfg)
+    html = """
+    <html><body><main>
+      <article>
+        <h1>Finance Officer</h1>
+        <div class="sidebar">
+          <p>Latest jobs and recommended opportunities</p>
+        </div>
+        <section class="job-description">
+          <p>Manage finance records, donor reports, procurement controls, and reconciliations for a Zimbabwe programme.</p>
+          <p>Location: Harare</p>
+          <p>Company: Example NGO</p>
+          <p>Qualifications: Accounting diploma and three years experience.</p>
+        </section>
+      </article>
+    </main></body></html>
+    """
+    raw = parser.parse_detail(html, "https://vacancymail.co.zw/jobs/finance-officer-1/")
+    assert raw is not None
+    assert raw.title == "Finance Officer"
+    assert "Manage finance records" in raw.summary
+    assert "Latest jobs" not in raw.summary
+
+
 def test_json_ld_parser_preserves_enriched_fields():
     cfg = SourceConfig(name="jsonld", type="generic", start_urls=[], default_location="Zimbabwe")
     parser = GenericParser(cfg)

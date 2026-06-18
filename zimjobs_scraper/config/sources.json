@@ -2,7 +2,7 @@
   {
     "name": "reliefweb_zimbabwe_api",
     "type": "reliefweb_api",
-    "enabled": true,
+    "enabled": false,
     "start_urls": [
       "https://api.reliefweb.int/v2/jobs?appname=zimjobs-online&profile=full&limit=100&preset=latest&slim=0&query[value]=Zimbabwe"
     ],
@@ -12,13 +12,14 @@
     "default_category": "NGO & Development",
     "allowed_locations": ["Zimbabwe", "Harare", "Bulawayo", "Remote", "Africa", "Home Based"],
     "attribution": "ReliefWeb API. Respect original source copyright and link back to ReliefWeb/original agency.",
-    "legal_status": "Official read-only API; requires appname and quota/rate-limit respect.",
-    "skip_expired": true
+    "legal_status": "Official read-only API; currently disabled because robots.txt disallows the configured API path.",
+    "skip_expired": true,
+    "notes": "Runtime audit on 2026-06-18 found robots.txt disallows /v2/jobs for this host; keep disabled unless ReliefWeb grants an approved API route."
   },
   {
     "name": "weworkremotely_rss",
     "type": "rss",
-    "enabled": true,
+    "enabled": false,
     "start_urls": [
       "https://weworkremotely.com/remote-jobs.rss",
       "https://weworkremotely.com/categories/remote-programming-jobs.rss",
@@ -32,13 +33,14 @@
     "default_category": "Remote & International",
     "allowed_locations": ["Remote", "Worldwide", "Anywhere", "Global", "Africa", "EMEA", "Zimbabwe"],
     "attribution": "Attribute and direct-link back to We Work Remotely.",
-    "legal_status": "Official public RSS feed; no scraping of application flows.",
-    "skip_expired": true
+    "legal_status": "Official public RSS feed; currently disabled because robots.txt disallows the configured RSS paths.",
+    "skip_expired": true,
+    "notes": "Runtime audit on 2026-06-18 found robots.txt blocks the configured RSS URLs; keep disabled to avoid repeated blocked requests."
   },
   {
     "name": "jobicy_remote_api",
     "type": "jobicy_api",
-    "enabled": true,
+    "enabled": false,
     "start_urls": [
       "https://jobicy.com/api/v2/remote-jobs?count=100"
     ],
@@ -48,8 +50,9 @@
     "default_category": "Remote & International",
     "allowed_locations": ["Remote", "Worldwide", "Anywhere", "Global", "Africa", "EMEA", "Zimbabwe"],
     "attribution": "Attribute and direct-link back to Jobicy.com; do not over-poll.",
-    "legal_status": "Official public API/RSS; observe fair-use and redistribution restrictions.",
-    "skip_expired": true
+    "legal_status": "Official public API/RSS; currently disabled because robots.txt disallows the configured API path.",
+    "skip_expired": true,
+    "notes": "Runtime audit on 2026-06-18 found robots.txt blocks /api/v2/remote-jobs; keep disabled unless an approved feed is available."
   },
   {
     "name": "remoteok_api",
@@ -98,7 +101,7 @@
   {
     "name": "alljobspo_zimbabwe",
     "type": "generic",
-    "enabled": true,
+    "enabled": false,
     "start_urls": [
       "https://jobsinzimbabwe.alljobspo.com/"
     ],
@@ -107,7 +110,7 @@
     "default_location": "Zimbabwe",
     "default_category": "Private Sector",
     "allowed_locations": ["Zimbabwe", "Harare", "Bulawayo", "Mutare", "Gweru", "Remote", "Africa"],
-    "legal_status": "Public job aggregator; verify robots.txt and original-source attribution before high-volume crawling.",
+    "legal_status": "Public job aggregator; disabled because robots.txt disallows the configured entry point.",
     "skip_expired": true,
     "site_type": "job_board",
     "pagination_strategy": "auto",
@@ -125,12 +128,12 @@
       "telegram",
       "mailto:"
     ],
-    "notes": "Listing page exposes /job-details/{id} links and pagination links. Keep page/detail limits conservative because this is an aggregator."
+    "notes": "Runtime audit on 2026-06-18 found robots.txt disallows the configured entry point; keep disabled unless permission or a permitted feed is available."
   },
   {
     "name": "iharare_jobs",
     "type": "generic",
-    "enabled": true,
+    "enabled": false,
     "start_urls": [
       "https://ihararejobs.com/"
     ],
@@ -139,8 +142,9 @@
     "default_location": "Zimbabwe",
     "default_category": "Private Sector",
     "allowed_locations": ["Zimbabwe", "Harare", "Bulawayo", "Remote", "Africa", "Home Based"],
-    "legal_status": "Public HTML; verify robots.txt and original-source attribution.",
-    "skip_expired": true
+    "legal_status": "Public HTML; disabled because robots.txt disallows the configured entry point.",
+    "skip_expired": true,
+    "notes": "Runtime audit on 2026-06-18 found robots.txt disallows the configured entry point."
   },
   {
     "name": "psc_zimbabwe_erecruitment",
@@ -171,7 +175,7 @@
   {
     "name": "unjobs_zimbabwe",
     "type": "generic",
-    "enabled": true,
+    "enabled": false,
     "start_urls": [
       "https://unjobs.org/duty_stations/zimbabwe"
     ],
@@ -180,8 +184,9 @@
     "default_location": "Zimbabwe",
     "default_category": "NGO & Development",
     "allowed_locations": ["Zimbabwe", "Harare", "Remote", "Africa", "Home Based"],
-    "legal_status": "Public aggregator; prefer original UN/agency application URLs and link attribution.",
-    "skip_expired": true
+    "legal_status": "Public aggregator; disabled because robots.txt disallows the configured duty-station path.",
+    "skip_expired": true,
+    "notes": "Runtime audit on 2026-06-18 found robots.txt disallows the configured duty-station URL."
   },
   {
     "name": "cvpeopleafrica_zimbabwe",
@@ -244,7 +249,7 @@
   {
     "name": "delta_corporation_vacancies",
     "type": "generic",
-    "enabled": true,
+    "enabled": false,
     "start_urls": [
       "https://delta.co.zw/vacancies/"
     ],
@@ -254,8 +259,9 @@
     "default_category": "Private Sector",
     "default_company": "Delta Corporation",
     "allowed_locations": ["Zimbabwe", "Harare", "Bulawayo", "Kwekwe", "Mutare"],
-    "legal_status": "Official employer page; may include PDF adverts, keep original URL.",
-    "skip_expired": true
+    "legal_status": "Official employer page; disabled because robots.txt disallows the configured vacancies path.",
+    "skip_expired": true,
+    "notes": "Runtime audit on 2026-06-18 found robots.txt disallows /vacancies/."
   },
   {
     "name": "msu_vacancies",

@@ -478,6 +478,53 @@ def test_quality_v3_rejects_generic_multi_vacancy_title_and_sentence_company():
     assert "title_not_real_role" in result.reasons
 
 
+def test_validator_rejects_task_fragment_job_titles():
+    cfg = SourceConfig(name="vacancymail_zimbabwe", type="generic", start_urls=[], default_location="Zimbabwe", default_category="Private Sector")
+    for title in [
+        "Monitor surveillance equipment such as CCTV systems",
+        "Examine structural drivers of learning disparities",
+        "Registered General Nurse qualification with a minimum of two years work experience",
+    ]:
+        job = map_raw_job(
+            RawJob(
+                source_name="vacancymail_zimbabwe",
+                source_url="https://example.com/jobs/1",
+                title=title,
+                company="Example Company",
+                location="Zimbabwe",
+                summary="This role supports operational delivery in Zimbabwe with clear responsibilities, reporting lines, and application instructions.",
+                apply_url="https://example.com/jobs/1",
+            ),
+            cfg,
+        )
+        result = JobValidator(skip_expired=False).validate(job)
+        assert not result.ok
+        assert "title_not_real_role" in result.reasons
+
+
+def test_mapper_preserves_common_zimbabwe_role_titles_over_body_matches():
+    cfg = SourceConfig(name="vacancymail_zimbabwe", type="generic", start_urls=[], default_location="Zimbabwe", default_category="Private Sector")
+    for title in ["Security Guard", "Artisan - Fitter & Turner", "Radiographer", "Salesperson - Kwekwe and Mutare"]:
+        job = map_raw_job(
+            RawJob(
+                source_name="vacancymail_zimbabwe",
+                source_url="https://vacancymail.co.zw/jobs/example-1/",
+                title=title,
+                company="Example Company",
+                location="Zimbabwe",
+                summary="""
+                Assistant Regional Loss Control Officer
+                This is related page content that should not replace the current detail page title.
+                The current role is based in Zimbabwe with standard job responsibilities and application instructions.
+                """,
+                apply_url="https://vacancymail.co.zw/jobs/example-1/",
+            ),
+            cfg,
+        )
+        assert job.title == title
+        assert JobValidator(skip_expired=False).validate(job).ok
+
+
 def test_somewhere_marketing_page_is_skipped_by_parser():
     from zimjobs_scraper.parsers import SomewhereParser
 
