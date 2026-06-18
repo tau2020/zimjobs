@@ -3,6 +3,7 @@ from pathlib import Path
 
 from zimjobs_scraper.db import SQLiteJobRepository
 from zimjobs_scraper.dedupe import dedupe_in_memory
+from zimjobs_scraper.backfill_vacancymail import backfill_vacancy_mail_companies
 from zimjobs_scraper.clean_db import clean_jobs
 from zimjobs_scraper.mapper import map_raw_job
 from zimjobs_scraper.models import RawJob
@@ -75,6 +76,172 @@ def test_mapping_uses_default_company_when_extraction_is_noisy():
     )
     job = map_raw_job(raw, cfg)
     assert job.company == "Zimplats"
+
+
+def test_vacancy_mail_zimbabwe_explicit_company_in_description():
+    cfg = SourceConfig(name="vacancymail_zimbabwe", type="generic", start_urls=[], default_location="Zimbabwe")
+    job = map_raw_job(
+        RawJob(
+            source_name="vacancymail_zimbabwe",
+            source_url="https://vacancymail.co.zw/jobs/lab-tech-1/",
+            title="Laboratory Technician",
+            company="Vacancy Mail",
+            location="Zimbabwe",
+            summary="Company: The Union Zimbabwe Trust\nThe role supports laboratory operations and reporting.",
+            apply_url="https://vacancymail.co.zw/jobs/lab-tech-1/",
+        ),
+        cfg,
+    )
+    assert job.company == "The Union Zimbabwe Trust"
+
+
+def test_vacancy_mail_zimbabwe_organization_name_in_description():
+    cfg = SourceConfig(name="vacancymail_zimbabwe", type="generic", start_urls=[], default_location="Zimbabwe")
+    job = map_raw_job(
+        RawJob(
+            source_name="vacancymail_zimbabwe",
+            source_url="https://vacancymail.co.zw/jobs/lab-tech-2/",
+            title="Laboratory Technician",
+            company="Vacancy Mail",
+            location="Zimbabwe",
+            summary="The Union Zimbabwe Trust seeks a laboratory technician to support testing, quality control, and reporting.",
+            apply_url="https://vacancymail.co.zw/jobs/lab-tech-2/",
+        ),
+        cfg,
+    )
+    assert job.company == "The Union Zimbabwe Trust"
+
+
+def test_vacancy_mail_zimbabwe_company_from_custom_email_domain():
+    cfg = SourceConfig(name="vacancymail_zimbabwe", type="generic", start_urls=[], default_location="Zimbabwe")
+    job = map_raw_job(
+        RawJob(
+            source_name="vacancymail_zimbabwe",
+            source_url="https://vacancymail.co.zw/jobs/lab-tech-3/",
+            title="LABORATORY TECHNICIAN",
+            company=" vacancy   mail ",
+            location="Zimbabwe",
+            summary="Send applications to hr@supremebrands.co.zw with a CV and cover letter.",
+            apply_url="https://vacancymail.co.zw/jobs/lab-tech-3/",
+        ),
+        cfg,
+    )
+    assert job.company == "Supreme Brands"
+
+
+def test_vacancy_mail_zimbabwe_generic_email_domain_ignored():
+    cfg = SourceConfig(name="vacancymail_zimbabwe", type="generic", start_urls=[], default_location="Zimbabwe")
+    job = map_raw_job(
+        RawJob(
+            source_name="vacancymail_zimbabwe",
+            source_url="https://vacancymail.co.zw/jobs/admin-1/",
+            title="Administrative Assistant",
+            company="Vacancy Mail",
+            location="Zimbabwe",
+            summary="Send applications to hiringteam@gmail.com. The role supports office records and scheduling.",
+            apply_url="https://vacancymail.co.zw/jobs/admin-1/",
+        ),
+        cfg,
+    )
+    assert job.company == "Vacancy Mail"
+
+
+def test_vacancy_mail_zimbabwe_existing_valid_company_preserved():
+    cfg = SourceConfig(name="vacancymail_zimbabwe", type="generic", start_urls=[], default_location="Zimbabwe")
+    job = map_raw_job(
+        RawJob(
+            source_name="vacancymail_zimbabwe",
+            source_url="https://vacancymail.co.zw/jobs/finance-1/",
+            title="Finance Officer",
+            company="Actual Employer",
+            location="Zimbabwe",
+            summary="Company: Another Employer\nThe role supports finance controls and reporting.",
+            apply_url="https://vacancymail.co.zw/jobs/finance-1/",
+        ),
+        cfg,
+    )
+    assert job.company == "Actual Employer"
+
+
+def test_vacancy_mail_non_zimbabwe_posting_unaffected():
+    cfg = SourceConfig(name="vacancymail_south_africa", type="generic", start_urls=[], default_location="South Africa")
+    job = map_raw_job(
+        RawJob(
+            source_name="vacancymail_south_africa",
+            source_url="https://example.com/jobs/admin-2/",
+            title="Administrative Assistant",
+            company="Vacancy Mail",
+            location="South Africa",
+            summary="Company: Example Employer\nThe role supports office records and scheduling.",
+            apply_url="https://example.com/jobs/admin-2/",
+        ),
+        cfg,
+    )
+    assert job.company == "Vacancy Mail"
+
+
+def test_vacancy_mail_zimbabwe_accented_company_name_preserved():
+    cfg = SourceConfig(name="vacancymail_zimbabwe", type="generic", start_urls=[], default_location="Zimbabwe")
+    job = map_raw_job(
+        RawJob(
+            source_name="vacancymail_zimbabwe",
+            source_url="https://vacancymail.co.zw/jobs/programme-intern-1/",
+            title="Programme Intern",
+            company="Vacancy Mail",
+            location="Zimbabwe",
+            summary="About Trócaire\nTrócaire is recruiting a programme intern to support partner coordination.",
+            apply_url="https://vacancymail.co.zw/jobs/programme-intern-1/",
+        ),
+        cfg,
+    )
+    assert job.company == "Trócaire"
+
+
+def test_vacancy_mail_backfill_updates_confident_rows_and_skips_weak_guesses(tmp_path: Path):
+    db_path = tmp_path / "jobs.db"
+    repo = SQLiteJobRepository(str(db_path), auto_add_optional_columns=True)
+    repo.conn.execute(
+        """INSERT INTO jobs(title, company, location, category, summary, apply_url, source_name, source_url, job_description)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            "LABORATORY TECHNICIAN",
+            "Vacancy Mail",
+            "Zimbabwe",
+            "Private Sector",
+            "Send applications to hr@supremebrands.co.zw with a CV.",
+            "https://vacancymail.co.zw/jobs/lab-tech-4/",
+            "vacancymail_zimbabwe",
+            "https://vacancymail.co.zw/jobs/lab-tech-4/",
+            "Send applications to hr@supremebrands.co.zw with a CV.",
+        ),
+    )
+    repo.conn.execute(
+        """INSERT INTO jobs(title, company, location, category, summary, apply_url, source_name, source_url, job_description)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            "Administrative Assistant",
+            "Vacancy Mail",
+            "Zimbabwe",
+            "Private Sector",
+            "Send applications to hiringteam@gmail.com.",
+            "https://vacancymail.co.zw/jobs/admin-3/",
+            "vacancymail_zimbabwe",
+            "https://vacancymail.co.zw/jobs/admin-3/",
+            "Send applications to hiringteam@gmail.com.",
+        ),
+    )
+    repo.conn.commit()
+    repo.close()
+
+    stats = backfill_vacancy_mail_companies(str(db_path))
+
+    con = sqlite3.connect(db_path)
+    rows = con.execute("SELECT title, company FROM jobs ORDER BY id").fetchall()
+    con.close()
+    assert stats.scanned == 2
+    assert stats.updated == 1
+    assert stats.skipped == 1
+    assert rows == [("LABORATORY TECHNICIAN", "Supreme Brands"), ("Administrative Assistant", "Vacancy Mail")]
 
 
 def test_dedupe_by_url():

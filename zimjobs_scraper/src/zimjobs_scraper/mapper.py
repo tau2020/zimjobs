@@ -20,6 +20,7 @@ from .normalization import (
     normalize_location,
     normalize_remote_status,
     normalize_url,
+    resolve_vacancy_mail_zimbabwe_company,
 )
 from .parsers import SourceConfig
 
@@ -35,8 +36,19 @@ def map_raw_job(raw: RawJob, config: SourceConfig) -> JobRecord:
     else:
         inferred_company = infer_company(original_title, body)
         company = inferred_company if looks_like_good_company(inferred_company) else clean_text(config.default_company) or "Confidential"
-    title = clean_job_title(original_title, company=company, text=body)
     location = normalize_location(raw.location, title=original_title, text=body, default=config.default_location)
+    corrected_company = resolve_vacancy_mail_zimbabwe_company(
+        company,
+        original_title,
+        body,
+        location,
+        source_name=raw.source_name or config.name,
+        source_url=raw.source_url,
+        apply_url=raw.apply_url,
+    )
+    if corrected_company:
+        company = corrected_company
+    title = clean_job_title(original_title, company=company, text=body)
     category = normalize_category(raw.category or config.default_category, title=f"{original_title} {title}", location=location, text=body, default=config.default_category)
     employment_type = clean_text(raw.employment_type) or normalize_employment_type(body)
     salary_range = clean_text(raw.salary_range) or extract_salary(body)

@@ -166,6 +166,93 @@ BAD_COMPANY_RE = re.compile(
     re.I,
 )
 
+GENERIC_EMAIL_DOMAINS = {
+    "aol.com",
+    "gmail.com",
+    "googlemail.com",
+    "hotmail.com",
+    "icloud.com",
+    "live.com",
+    "mail.com",
+    "me.com",
+    "outlook.com",
+    "proton.me",
+    "protonmail.com",
+    "yahoo.com",
+    "yandex.com",
+    "zoho.com",
+}
+
+GENERIC_DOMAIN_LABELS = {
+    "admin",
+    "apply",
+    "career",
+    "careers",
+    "email",
+    "employment",
+    "enquiries",
+    "hr",
+    "info",
+    "jobs",
+    "mail",
+    "recruitment",
+    "vacancies",
+    "vacancy",
+}
+
+COMPANY_DOMAIN_SUFFIXES = (
+    "communications",
+    "construction",
+    "technologies",
+    "enterprises",
+    "engineering",
+    "industries",
+    "investments",
+    "properties",
+    "solutions",
+    "logistics",
+    "services",
+    "holdings",
+    "supplies",
+    "resources",
+    "products",
+    "trading",
+    "transport",
+    "consulting",
+    "retail",
+    "brands",
+    "foods",
+    "group",
+    "mining",
+    "motors",
+    "trust",
+)
+
+KNOWN_ORGANIZATION_NAMES = (
+    "ActionAid",
+    "CARE International",
+    "Caritas",
+    "Christian Aid",
+    "FHI 360",
+    "GOAL",
+    "Oxfam",
+    "Plan International",
+    "Save the Children",
+    "Trócaire",
+    "UNDP",
+    "UNFPA",
+    "UNHCR",
+    "UNICEF",
+    "Welthungerhilfe",
+    "World Vision",
+)
+
+ORG_SUFFIX_PATTERN = (
+    "Agency|Association|Bank|Brands|Centre|Center|Church|Clinic|College|Company|Corporation|"
+    "Council|Foundation|Fund|Group|Holdings|Hospital|Institute|International|Limited|Ltd|"
+    "Mission|Network|Organisation|Organization|Pvt\\s+Ltd|Society|Trust|University"
+)
+
 
 def looks_like_real_role(value: str | None) -> bool:
     title = clean_text(value)
@@ -202,6 +289,183 @@ def looks_like_good_company(value: str | None) -> bool:
     if re.search(r"[.!?]", company):
         return False
     return bool(re.search(r"[A-Za-z0-9]", company))
+
+
+def is_vacancy_mail_company(value: str | None) -> bool:
+    return re.sub(r"[^a-z0-9]+", "", clean_text(value).lower()) == "vacancymail"
+
+
+def is_zimbabwe_vacancy_mail_context(
+    location: str | None,
+    source_name: str | None = None,
+    source_url: str | None = None,
+) -> bool:
+    location_text = clean_text(location).lower()
+    if re.search(r"\bzimbabwe\b", location_text):
+        return True
+    source_text = f"{source_name or ''} {source_url or ''}".lower()
+    if "vacancymail_zimbabwe" in source_text:
+        return True
+    parsed = urlparse(source_url or "")
+    return parsed.netloc.lower().endswith("vacancymail.co.zw")
+
+
+def _clean_company_candidate(candidate: str | None) -> str | None:
+    company = clean_text(candidate)
+    if not company:
+        return None
+    company = re.sub(r"^(?:the\s+company|company|organisation|organization|employer|hiring\s+company)\s*:?\s*", "", company, flags=re.I)
+    company = re.sub(r"\s+(?:Zimbabwe\s+)?Jobs?$", "", company, flags=re.I)
+    company = re.sub(r"\s*\|.*$", "", company).strip()
+    company = re.sub(r"\s+[-–—]\s+(?:job|vacanc(?:y|ies)|role|position).*$", "", company, flags=re.I)
+    company = re.sub(
+        r"\s+(?:is|are)\s+(?:hiring|recruiting|seeking|looking|inviting|a|an|the)\b.*$",
+        "",
+        company,
+        flags=re.I,
+    )
+    company = re.sub(r"\s+\b(?:job|vacancy|role|position)$", "", company, flags=re.I)
+    company = clean_text(company.strip(" ,;:"))
+    if not looks_like_good_company(company):
+        return None
+    if re.search(r"\b(?:applicants?|candidates?|applications?|qualifications?|requirements?|duties|responsibilities)\b", company, re.I):
+        return None
+    return company
+
+
+def _extract_explicit_company_from_description(title: str | None, text: str | None) -> str | None:
+    heading = clean_text(title)
+    body = clean_text(text or "", max_spaces=False)
+    for candidate in (extract_company_from_text(heading, body),):
+        company = _clean_company_candidate(candidate)
+        if company:
+            return company
+
+    patterns = [
+        r"(?im)^\s*(?:[•\-*]\s*)?(?:Company|Organisation|Organization|Employer|Hiring\s+Company|Hiring\s+Organization|The\s+company)\s*:\s*([^\n]{2,120})",
+        r"(?im)^\s*About\s+([^\n:]{2,120}?)(?:\s+(?:is|are|the\s+(?:organisation|organization|company))\b|\n|$)",
+        r"(?im)^\s*([^\n]{2,120}?)\s+(?:is|are)\s+(?:hiring|recruiting|seeking|looking\s+for|inviting)\b",
+        r"(?im)\bApplications\s+are\s+invited\s+from\s+suitably\s+qualified\s+candidates\s+by\s+([^\n.;]{2,120})",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, body):
+            company = _clean_company_candidate(match.group(1))
+            if company:
+                return company
+    return None
+
+
+def _extract_known_organization_from_description(text: str | None) -> str | None:
+    body = clean_text(text or "", max_spaces=False)
+    if not body:
+        return None
+
+    for name in KNOWN_ORGANIZATION_NAMES:
+        if re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", body, flags=re.I):
+            return name
+
+    # Organization suffixes are high-signal enough to use when the source company is only the aggregator.
+    pattern = rf"(?<![\w-])((?:The\s+)?[A-Z][\wÀ-ÖØ-öø-ÿ&.'’/-]*(?:\s+[A-Z][\wÀ-ÖØ-öø-ÿ&.'’/-]*){{0,7}}\s+(?:{ORG_SUFFIX_PATTERN}))\b"
+    for match in re.finditer(pattern, body):
+        company = _clean_company_candidate(match.group(1))
+        if company and not re.search(r"\b(?:Job|Vacancy|Application|Selection|Human Resources|Finance Department)\b", company, re.I):
+            return company
+    return None
+
+
+def _registered_domain_label(domain: str) -> str:
+    domain = domain.lower().strip(".")
+    parts = [part for part in domain.split(".") if part]
+    if len(parts) < 2:
+        return ""
+    second_level_suffixes = {
+        "ac.zw",
+        "co.zw",
+        "gov.zw",
+        "org.zw",
+        "co.uk",
+        "com.au",
+        "co.za",
+    }
+    suffix = ".".join(parts[-2:])
+    if suffix in second_level_suffixes and len(parts) >= 3:
+        return parts[-3]
+    return parts[-2]
+
+
+def _split_domain_label(label: str) -> list[str]:
+    label = re.sub(r"^(?:the|my|go|get)[-_]?", "", label.lower())
+    pieces = [piece for piece in re.split(r"[-_.]+", label) if piece and piece not in GENERIC_DOMAIN_LABELS]
+    if len(pieces) != 1:
+        return pieces
+    piece = pieces[0]
+    for suffix in COMPANY_DOMAIN_SUFFIXES:
+        if piece.endswith(suffix) and len(piece) > len(suffix) + 2:
+            return [piece[: -len(suffix)], suffix]
+    return [piece]
+
+
+def _title_case_domain_piece(piece: str) -> str:
+    acronyms = {"ngo", "nssa", "zimra", "zesa", "zimplats"}
+    if piece in acronyms:
+        return piece.upper()
+    return piece.capitalize()
+
+
+def extract_company_from_email_domain(text: str | None) -> str | None:
+    body = clean_text(text or "")
+    if not body:
+        return None
+    emails = re.findall(r"(?i)\b[A-Z0-9._%+\-]+@([A-Z0-9.\-]+\.[A-Z]{2,})\b", body)
+    for domain in emails:
+        domain = domain.lower().strip(".")
+        if domain in GENERIC_EMAIL_DOMAINS:
+            continue
+        label = _registered_domain_label(domain)
+        if not label or label in GENERIC_DOMAIN_LABELS:
+            continue
+        pieces = _split_domain_label(label)
+        if not pieces:
+            continue
+        company = clean_text(" ".join(_title_case_domain_piece(piece) for piece in pieces))
+        if looks_like_good_company(company):
+            return company
+    return None
+
+
+def extract_vacancy_mail_zimbabwe_company(
+    title: str | None,
+    text: str | None,
+    *,
+    apply_url: str | None = None,
+    source_url: str | None = None,
+) -> str | None:
+    combined = "\n".join(clean_text(part, max_spaces=False) for part in [text, apply_url, source_url] if part)
+    return (
+        _extract_explicit_company_from_description(title, combined)
+        or _extract_known_organization_from_description(combined)
+        or extract_company_from_email_domain(combined)
+    )
+
+
+def resolve_vacancy_mail_zimbabwe_company(
+    current_company: str | None,
+    title: str | None,
+    text: str | None,
+    location: str | None,
+    *,
+    source_name: str | None = None,
+    source_url: str | None = None,
+    apply_url: str | None = None,
+) -> str | None:
+    if not is_vacancy_mail_company(current_company):
+        return None
+    if not is_zimbabwe_vacancy_mail_context(location, source_name=source_name, source_url=source_url):
+        return None
+    company = extract_vacancy_mail_zimbabwe_company(title, text, apply_url=apply_url, source_url=source_url)
+    if company and not is_vacancy_mail_company(company):
+        return company
+    return None
 
 
 def _strip_title_noise(title: str) -> str:
