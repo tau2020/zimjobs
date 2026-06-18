@@ -171,7 +171,7 @@ def test_job_page_renders_schema_only_for_active_detail_pages(tmp_path, monkeypa
     assert active_schema["baseSalary"]["value"]["value"] == 900
     assert listing_response.status_code == 200
     assert "JobPosting" not in listing_response.get_data(as_text=True)
-    assert expired_response.status_code == 404
+    assert expired_response.status_code == 410
     assert "JobPosting" not in expired_response.get_data(as_text=True)
 
 
@@ -211,23 +211,34 @@ def test_sitemap_robots_and_canonical_rules(tmp_path, monkeypatch):
     home_response = client.get("/")
     search_response = client.get("/?q=finance")
     utility_response = client.get(f"/job/{utility_id}/cookies-policy")
+    admin_response = client.get("/admin/")
 
     xml_root = ElementTree.fromstring(sitemap_response.get_data(as_text=True))
     ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
     locs = [loc.text for loc in xml_root.findall(".//sm:loc", ns)]
+    robots_text = robots_response.get_data(as_text=True)
 
     assert sitemap_response.status_code == 200
+    assert sitemap_response.mimetype == "application/xml"
     assert f"https://zimjobs.example/job/{active_id}/harare-finance-officer" in locs
     assert f"https://zimjobs.example/job/{expired_id}/expired-finance-officer" not in locs
     assert f"https://zimjobs.example/job/{utility_id}/cookies-policy" not in locs
     assert "https://zimjobs.example/jobs/harare/" in locs
     assert "https://zimjobs.example/login" not in locs
-    assert "Sitemap: https://zimjobs.example/sitemap.xml" in robots_response.get_data(as_text=True)
-    assert "Disallow: /admin/" in robots_response.get_data(as_text=True)
+    assert "https://zimjobs.example/admin/" not in locs
+    assert robots_response.status_code == 200
+    assert robots_response.mimetype == "text/plain"
+    assert "Sitemap: https://zimjobs.example/sitemap.xml" in robots_text
+    assert "Disallow: /admin/" in robots_text
+    assert "Disallow: /api/" in robots_text
+    assert "Disallow: /preview/" in robots_text
+    assert "Disallow: /health" in robots_text
+    assert "Disallow: /static/" not in robots_text
     assert canonical_href(home_response.get_data(as_text=True)) == "https://zimjobs.example/"
     assert robots_meta(search_response.get_data(as_text=True)) == "noindex,follow"
     assert canonical_href(search_response.get_data(as_text=True)) == "https://zimjobs.example/"
     assert utility_response.status_code == 404
+    assert admin_response.status_code == 302
 
 
 def test_landing_page_renders_filtered_jobs_alert_cta_and_tracking(tmp_path, monkeypatch):
@@ -276,13 +287,46 @@ def test_job_detail_has_growth_tracking_hooks_and_sticky_apply(tmp_path, monkeyp
     )
 
     response = web_app.app.test_client().get(f"/job/{job_id}/finance-officer")
-    soup = BeautifulSoup(response.get_data(as_text=True), "html.parser")
+    html = response.get_data(as_text=True)
+    soup = BeautifulSoup(html, "html.parser")
+    schema = first_jobposting_schema(html)
 
     assert response.status_code == 200
+    assert soup.title.string == "Finance Officer - Example NGO | ZimJobs Hub"
+    assert meta_content(html, "description") == (
+        "Finance Officer at Example NGO - Harare. Manage programme finance."
+    )
+    assert canonical_href(html) == f"https://zimjobs.example/job/{job_id}/finance-officer"
+    assert meta_property(html, "og:type") == "article"
+    assert meta_property(html, "og:url") == f"https://zimjobs.example/job/{job_id}/finance-officer"
+    assert meta_property(html, "og:title") == "Finance Officer - Example NGO"
+    assert meta_content(html, "twitter:card") == "summary"
+    assert schema["@type"] == "JobPosting"
+    assert schema["url"] == f"https://zimjobs.example/job/{job_id}/finance-officer"
     assert soup.find(attrs={"data-track-view": "job_view"})
     assert soup.find("a", attrs={"data-track-event": "apply_click_out", "data-track-source": "job_detail"})
     assert soup.find("a", attrs={"data-track-event": "apply_click_out", "data-track-source": "sticky_apply"})
     assert soup.find("a", attrs={"data-track-event": "whatsapp_channel_join_click"})
+
+
+def test_job_detail_redirects_duplicate_slug_urls_to_canonical(tmp_path, monkeypatch):
+    web_app = import_web_app(tmp_path, monkeypatch)
+    job_id = insert_job(
+        web_app,
+        title="Finance Officer",
+        company="Example NGO",
+        location="Harare",
+        summary="Manage programme finance.",
+    )
+
+    client = web_app.app.test_client()
+    no_slug_response = client.get(f"/job/{job_id}")
+    wrong_slug_response = client.get(f"/job/{job_id}/old-title")
+
+    assert no_slug_response.status_code == 301
+    assert no_slug_response.headers["Location"] == f"https://zimjobs.example/job/{job_id}/finance-officer"
+    assert wrong_slug_response.status_code == 301
+    assert wrong_slug_response.headers["Location"] == f"https://zimjobs.example/job/{job_id}/finance-officer"
 
 
 def test_email_alert_signup_persists_subscription(tmp_path, monkeypatch):
@@ -420,4 +464,16 @@ def canonical_href(page_html: str):
 def robots_meta(page_html: str):
     soup = BeautifulSoup(page_html, "html.parser")
     tag = soup.find("meta", attrs={"name": "robots"})
+    return tag["content"] if tag else None
+
+
+def meta_content(page_html: str, name: str):
+    soup = BeautifulSoup(page_html, "html.parser")
+    tag = soup.find("meta", attrs={"name": name})
+    return tag["content"] if tag else None
+
+
+def meta_property(page_html: str, property_name: str):
+    soup = BeautifulSoup(page_html, "html.parser")
+    tag = soup.find("meta", attrs={"property": property_name})
     return tag["content"] if tag else None

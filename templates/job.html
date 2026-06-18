@@ -1,11 +1,19 @@
 {% extends "base.html" %}
 {% from "_card.html" import job_card %}
 {% from "_affiliate.html" import affiliate_block %}
-{% block title %}{{ job['title'] }} — {{ job['company'] }} | ZimJobs Hub{% endblock %}
-{% block desc %}{{ job['title'] }} at {{ job['company'] }}, {{ job['location'] }}. Apply now via ZimJobs Hub.{% endblock %}
+{% set job_page_title = job['title'] ~ ' - ' ~ job['company'] ~ ' | ZimJobs Hub' %}
+{% set job_social_title = job['title'] ~ ' - ' ~ job['company'] %}
+{% block title %}{{ job_page_title }}{% endblock %}
+{% block desc %}{{ meta_description }}{% endblock %}
 {% block head %}
-<meta property="og:title" content="{{ job['title'] }} — {{ job['company'] }}">
-<meta property="og:description" content="{{ job['summary'][:150] }}">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ZimJobs Hub">
+<meta property="og:url" content="{{ url }}">
+<meta property="og:title" content="{{ job_social_title }}">
+<meta property="og:description" content="{{ meta_description }}">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="{{ job_social_title }}">
+<meta name="twitter:description" content="{{ meta_description }}">
 {% if job_json_ld %}
 <script type="application/ld+json">
 {{ job_json_ld|tojson }}

@@ -1,4 +1,4 @@
-import asyncio, hmac, json, logging, os, re, secrets, sqlite3, sys, threading, time
+import asyncio, hmac, html as html_lib, json, logging, os, re, secrets, sqlite3, sys, threading, time
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from math import ceil
@@ -938,6 +938,9 @@ def seed_affiliate_offers(db):
 # ----------------------------- helpers ------------------------------
 @app.template_filter("slug")
 def slug(text):
+    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", str(text or ""))
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html_lib.unescape(text)
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
 
 
@@ -1337,6 +1340,35 @@ def clean_job_display_text(value, max_chars=12000):
 
 def clean_inline_job_text(value):
     return re.sub(r"\s+", " ", clean_control_chars(value)).strip()
+
+
+def truncate_meta_description(value, limit=160):
+    text = clean_inline_job_text(value)
+    if len(text) <= limit:
+        return text
+    truncated = text[:limit + 1].rsplit(" ", 1)[0].rstrip(".,;:-")
+    return truncated or text[:limit].rstrip()
+
+
+def job_meta_description(row):
+    title = clean_inline_job_text(row_value(row, "title"))
+    company = clean_inline_job_text(row_value(row, "company"))
+    location = clean_inline_job_text(row_value(row, "location"))
+    summary = clean_inline_job_text(
+        clean_job_display_text(
+            row_value(row, "job_description") or row_value(row, "summary"),
+            max_chars=260,
+        )
+    )
+    intro = " ".join(part for part in [
+        f"{title} at {company}" if title and company else title or company,
+        f"- {location}" if location else "",
+    ] if part)
+    if intro and summary:
+        description = f"{intro}. {summary}"
+    else:
+        description = intro or summary
+    return truncate_meta_description(description)
 
 
 def clean_job_form_value(field, value):
@@ -1989,9 +2021,16 @@ def job(job_id, s=None):
         abort(400)
     db  = get_db()
     row = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
-    if not row or not row_is_public_job(row):
+    if not row:
         abort(404)
-    url = f"{SITE_URL}/job/{row['id']}/{slug(row['title'])}"
+    if is_closed_job(row):
+        abort(410)
+    if not row_is_public_job(row):
+        abort(404)
+    canonical_slug = slug(row["title"])
+    url = f"{SITE_URL}/job/{row['id']}/{canonical_slug}"
+    if s != canonical_slug:
+        return redirect(url, code=301)
     similar = similar_jobs(db, row)
     job_json_ld = build_job_posting_json_ld(row, {**SITE_CONFIG, "job_url": url})
     affiliate_offers = select_affiliate_offers(
@@ -2002,6 +2041,7 @@ def job(job_id, s=None):
     )
     return render_template("job.html", job=row, url=url, similar=similar,
                            canonical_url=url,
+                           meta_description=job_meta_description(row),
                            job_json_ld=job_json_ld,
                            affiliate_offers=affiliate_offers,
                            categories=CATEGORIES, cat=None, q="")
@@ -2296,8 +2336,16 @@ def robots():
         "Disallow: /account",
         "Disallow: /login",
         "Disallow: /register",
+        "Disallow: /logout",
+        "Disallow: /dashboard",
+        "Disallow: /api/",
+        "Disallow: /internal/",
+        "Disallow: /preview/",
+        "Disallow: /staging/",
         "Disallow: /affiliate/",
         "Disallow: /alerts/",
+        "Disallow: /health",
+        "Disallow: /healthz/",
         f"Sitemap: {SITE_URL}/sitemap.xml",
         "",
     ])
