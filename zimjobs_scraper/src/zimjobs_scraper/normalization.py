@@ -275,7 +275,7 @@ def looks_like_real_role(value: str | None) -> bool:
 
 def looks_like_good_company(value: str | None) -> bool:
     company = clean_text(value)
-    if not company or company.lower() in {"confidential", "n/a", "unknown"}:
+    if not company or company.lower() in {"confidential", "n/a", "unknown", "we", "us", "our", "they", "them", "their"}:
         return False
     if len(company) < 2 or len(company) > 90:
         return False
@@ -314,6 +314,8 @@ def _clean_company_candidate(candidate: str | None) -> str | None:
     company = clean_text(candidate)
     if not company:
         return None
+    if company.lower() in {"we", "us", "our", "ours", "they", "them", "their", "the company"}:
+        return None
     company = re.sub(r"^(?:the\s+company|company|organisation|organization|employer|hiring\s+company)\s*:?\s*", "", company, flags=re.I)
     company = re.sub(r"\s+(?:Zimbabwe\s+)?Jobs?$", "", company, flags=re.I)
     company = re.sub(r"\s*\|.*$", "", company).strip()
@@ -336,14 +338,11 @@ def _clean_company_candidate(candidate: str | None) -> str | None:
 def _extract_explicit_company_from_description(title: str | None, text: str | None) -> str | None:
     heading = clean_text(title)
     body = clean_text(text or "", max_spaces=False)
-    for candidate in (extract_company_from_text(heading, body),):
-        company = _clean_company_candidate(candidate)
-        if company:
-            return company
 
     patterns = [
         r"(?im)^\s*(?:[•\-*]\s*)?(?:Company|Organisation|Organization|Employer|Hiring\s+Company|Hiring\s+Organization|The\s+company)\s*:\s*([^\n]{2,120})",
         r"(?im)^\s*About\s+([^\n:]{2,120}?)(?:\s+(?:is|are|the\s+(?:organisation|organization|company))\b|\n|$)",
+        r"(?im)^\s*([^\n]{2,120}?)\s+(?:is|are)\s+(?:an?\s+(?:international|registered|non[- ]governmental|ngo|company|organisation|organization)|the\s+(?:company|organisation|organization))\b",
         r"(?im)^\s*([^\n]{2,120}?)\s+(?:is|are)\s+(?:hiring|recruiting|seeking|looking\s+for|inviting)\b",
         r"(?im)\bApplications\s+are\s+invited\s+from\s+suitably\s+qualified\s+candidates\s+by\s+([^\n.;]{2,120})",
     ]
@@ -352,6 +351,11 @@ def _extract_explicit_company_from_description(title: str | None, text: str | No
             company = _clean_company_candidate(match.group(1))
             if company:
                 return company
+
+    for candidate in (extract_company_from_text(heading, body),):
+        company = _clean_company_candidate(candidate)
+        if company:
+            return company
     return None
 
 

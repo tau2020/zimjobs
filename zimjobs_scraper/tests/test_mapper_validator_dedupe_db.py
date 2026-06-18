@@ -121,7 +121,7 @@ def test_vacancy_mail_zimbabwe_company_from_custom_email_domain():
             title="LABORATORY TECHNICIAN",
             company=" vacancy   mail ",
             location="Zimbabwe",
-            summary="Send applications to hr@supremebrands.co.zw with a CV and cover letter.",
+            summary="We are a market leader in tissue manufacturing. Send applications to hr@supremebrands.co.zw with a CV and cover letter.",
             apply_url="https://vacancymail.co.zw/jobs/lab-tech-3/",
         ),
         cfg,
@@ -144,6 +144,23 @@ def test_vacancy_mail_zimbabwe_generic_email_domain_ignored():
         cfg,
     )
     assert job.company == "Vacancy Mail"
+
+
+def test_vacancy_mail_zimbabwe_pronoun_company_guess_ignored():
+    cfg = SourceConfig(name="vacancymail_zimbabwe", type="generic", start_urls=[], default_location="Zimbabwe")
+    job = map_raw_job(
+        RawJob(
+            source_name="vacancymail_zimbabwe",
+            source_url="https://vacancymail.co.zw/jobs/general-manager-1/",
+            title="General Manager",
+            company="VacancyMail",
+            location="Harare",
+            summary="We are looking for a vibrant and dynamic individual to fill the above position.",
+            apply_url="https://vacancymail.co.zw/jobs/general-manager-1/",
+        ),
+        cfg,
+    )
+    assert job.company == "VacancyMail"
 
 
 def test_vacancy_mail_zimbabwe_existing_valid_company_preserved():
@@ -189,7 +206,11 @@ def test_vacancy_mail_zimbabwe_accented_company_name_preserved():
             title="Programme Intern",
             company="Vacancy Mail",
             location="Zimbabwe",
-            summary="About Trócaire\nTrócaire is recruiting a programme intern to support partner coordination.",
+            summary=(
+                "Trócaire is an International NGO. The intern will support partner coordination.\n"
+                "Similar Jobs\n"
+                "Save the Children\n"
+            ),
             apply_url="https://vacancymail.co.zw/jobs/programme-intern-1/",
         ),
         cfg,
