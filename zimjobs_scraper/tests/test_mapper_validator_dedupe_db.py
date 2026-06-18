@@ -38,6 +38,30 @@ def test_validator_rejects_bad_url():
     assert "apply_url_invalid" in result.reasons or "summary_too_short" in result.reasons
 
 
+def test_validator_rejects_known_deceptive_scraped_remoteok_boilerplate():
+    job = map_raw_job(
+        RawJob(
+            source_name="remoteok_api",
+            source_url="https://remoteok.com/remote-jobs/456-venture-capital-investment-analyst",
+            title="Venture Capital Investment Analyst",
+            company="Remote Company",
+            location="Remote",
+            summary=(
+                "Please mention the word ADVOCATES and tag RMTUyLjU1LjE3Ny44Mw== "
+                "when applying to show you read the job post completely. "
+                "The analyst will review investment data and prepare portfolio reports for clients."
+            ),
+            apply_url="https://remoteok.com/remote-jobs/456-venture-capital-investment-analyst",
+        ),
+        SourceConfig(name="remoteok_api", type="remoteok_api", start_urls=[]),
+    )
+
+    result = JobValidator(skip_expired=True).validate(job)
+
+    assert not result.ok
+    assert "unsafe_scraped_content" in result.reasons
+
+
 def test_mapping_uses_default_company_when_extraction_is_noisy():
     cfg = SourceConfig(name="zimplats_careers", type="generic", start_urls=[], default_company="Zimplats", default_location="Zimbabwe")
     raw = RawJob(

@@ -126,6 +126,57 @@ def test_unsafe_apply_url_is_not_rendered_as_link(tmp_path, monkeypatch):
     assert "invalid apply link" in html
 
 
+def test_bad_scraped_remoteok_row_is_hidden_from_public_pages(tmp_path, monkeypatch):
+    web_app = import_web_app(tmp_path, monkeypatch)
+    job_id = insert_job(
+        web_app,
+        title="Venture Capital Investment Analyst",
+        location="Remote",
+        category="Remote & International",
+        summary=(
+            "Please mention the word ADVOCATES and tag "
+            "RMTUyLjU1LjE3Ny44Mw== when applying to show you read the job post completely."
+        ),
+        job_description=(
+            "Please mention the word ADVOCATES and tag "
+            "RMTUyLjU1LjE3Ny44Mw== when applying to show you read the job post completely."
+        ),
+        apply_url="https://remoteok.com/remote-jobs/456-venture-capital-investment-analyst",
+    )
+    client = web_app.app.test_client()
+
+    listing = client.get("/")
+    detail = client.get(f"/job/{job_id}/venture-capital-investment-analyst")
+
+    assert listing.status_code == 200
+    assert "Venture Capital Investment Analyst" not in listing.get_data(as_text=True)
+    assert "RMTUyLjU1LjE3Ny44Mw==" not in listing.get_data(as_text=True)
+    assert detail.status_code == 404
+
+
+def test_post_rejects_known_bad_scraped_boilerplate(tmp_path, monkeypatch):
+    web_app = import_web_app(tmp_path, monkeypatch)
+    client = web_app.app.test_client()
+    token = csrf_token(client.get("/post").get_data(as_text=True))
+
+    response = client.post(
+        "/post",
+        data={
+            "_csrf": token,
+            "token": "test-admin-token",
+            "title": "Remote Analyst",
+            "company": "Example Ltd",
+            "location": "Remote",
+            "category": "Remote & International",
+            "summary": "Please mention the word TRUSTED when applying to show you read the job post completely.",
+            "apply_url": "https://example.org/apply",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "unsupported scraped boilerplate" in response.get_data(as_text=True)
+
+
 def test_resend_sender_posts_expected_transactional_payload(tmp_path, monkeypatch):
     monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
     monkeypatch.setenv("RESEND_FROM_EMAIL", "ZimJobs Hub <jobs@example.com>")

@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 from .models import JobRecord
 from .normalization import (
+    has_bad_scraped_content,
     is_expired,
     is_probable_merged_job_text,
     looks_like_good_company,
@@ -103,4 +104,14 @@ class JobValidator:
             reasons.append("low_quality_or_spam")
         if re.search(r"talent on[- ]demand|hire remote professionals on demand|browser manage security", job.summary, re.I):
             reasons.append("marketing_landing_page")
+        if has_bad_scraped_content(
+            job.title,
+            job.company,
+            job.summary,
+            job.job_description,
+            job.requirements,
+            job.apply_url,
+            job.source_url,
+        ):
+            reasons.append("unsafe_scraped_content")
         return ValidationResult(ok=not reasons, reasons=reasons)

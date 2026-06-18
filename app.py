@@ -19,10 +19,22 @@ if os.path.isdir(SCRAPER_SRC) and SCRAPER_SRC not in sys.path:
     sys.path.insert(0, SCRAPER_SRC)
 try:
     from zimjobs_scraper.normalization import (
+        has_bad_scraped_content as _has_bad_scraped_content,
         is_probable_merged_job_text as _is_probable_merged_job_text,
         normalize_job_text as _normalize_job_text,
     )
 except ImportError:  # pragma: no cover - fallback for unusual deployments.
+    def _has_bad_scraped_content(*values):
+        text = "\n".join(str(value or "") for value in values)
+        text_lower = text.lower()
+        return (
+            "RMTUyLjU1LjE3Ny44Mw==" in text
+            or "please mention the word" in text_lower
+            or "show you read the job post completely" in text_lower
+            or "see this and similar jobs on linkedin" in text_lower
+            or "remoteok.com/remote-jobs" in text_lower
+        )
+
     def _normalize_job_text(value, *, max_chars=None, **_):
         text = re.sub(r"[ \t\f\v]+", " ", str(value or "").replace("\r\n", "\n").replace("\r", "\n"))
         text = "\n".join(line.strip() for line in text.split("\n"))
@@ -1282,7 +1294,11 @@ def is_safe_public_url(url):
     if not url or len(url) > MAX_TEXT_LENGTHS["apply_url"]:
         return False
     parts = urlsplit(url)
-    return parts.scheme in {"http", "https"} and bool(parts.netloc)
+    return (
+        parts.scheme in {"http", "https"}
+        and bool(parts.netloc)
+        and not _has_bad_scraped_content(url)
+    )
 
 
 def valid_admin_token(value):
@@ -1310,6 +1326,15 @@ def validate_job_values(values, required_fields):
             return f"Invalid {field.replace('_', ' ')}."
     if values.get("apply_url") and not is_safe_public_url(values["apply_url"]):
         return "Apply URL must be a valid http or https URL."
+    if _has_bad_scraped_content(
+        values.get("title"),
+        values.get("company"),
+        values.get("summary"),
+        values.get("job_description"),
+        values.get("requirements"),
+        values.get("apply_url"),
+    ):
+        return "This listing contains unsupported scraped boilerplate or an unsafe apply URL."
     for date_field in ("expires_at", "posted_at"):
         value = values.get(date_field)
         if value and not re.match(r"^\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2})?$", value):
@@ -1616,11 +1641,24 @@ def row_looks_low_value_job(row):
     return False
 
 
+def row_has_bad_scraped_content(row):
+    return _has_bad_scraped_content(
+        row_value(row, "title"),
+        row_value(row, "company"),
+        row_value(row, "summary"),
+        row_value(row, "job_description"),
+        row_value(row, "requirements"),
+        row_value(row, "apply_url"),
+        row_value(row, "source_url"),
+    )
+
+
 def row_is_public_job(row):
     return (
         not is_closed_job(row)
         and not row_looks_accidentally_merged(row)
         and not row_looks_low_value_job(row)
+        and not row_has_bad_scraped_content(row)
     )
 
 

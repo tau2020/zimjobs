@@ -10,6 +10,11 @@ from typing import Callable, Iterable
 
 from .dedupe import canonical_url_key, identity_keys, normalized_key, similar
 from .models import JobRecord
+from .normalization import (
+    BAD_SCRAPED_EXACT_MARKERS,
+    BAD_SCRAPED_PHRASES,
+    BAD_SCRAPED_URL_PREFIXES,
+)
 
 log = logging.getLogger(__name__)
 
@@ -31,18 +36,9 @@ OPTIONAL_COLUMNS_SQL = {
 }
 
 BAD_DESCRIPTION_TEXT_COLUMNS = ("summary", "job_description", "requirements")
-BAD_DESCRIPTION_EXACT_MARKERS = (
-    "RMTUyLjU1LjE3Ny44Mw==",
-)
-BAD_DESCRIPTION_PHRASES = (
-    "please mention the word",
-    "beta feature to avoid spam applicants",
-    "companies can search these words",
-    "see this and similar jobs on linkedin",
-)
-BAD_SOURCE_URL_PREFIXES = (
-    "https://remoteok.com/remote-jobs",
-)
+BAD_DESCRIPTION_EXACT_MARKERS = BAD_SCRAPED_EXACT_MARKERS
+BAD_DESCRIPTION_PHRASES = BAD_SCRAPED_PHRASES
+BAD_SOURCE_URL_PREFIXES = BAD_SCRAPED_URL_PREFIXES
 
 
 class SQLiteJobRepository:

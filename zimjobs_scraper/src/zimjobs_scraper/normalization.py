@@ -797,3 +797,49 @@ def content_hash(values: Iterable[str | None]) -> str:
     joined = "|".join(clean_text(v).lower() for v in values if v)
     joined = re.sub(r"\W+", " ", joined)
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+BAD_SCRAPED_EXACT_MARKERS = (
+    "RMTUyLjU1LjE3Ny44Mw==",
+)
+
+BAD_SCRAPED_PHRASES = (
+    "please mention the word",
+    "show you read the job post completely",
+    "beta feature to avoid spam applicants",
+    "companies can search these words",
+    "see this and similar jobs on linkedin",
+)
+
+BAD_SCRAPED_URL_PREFIXES = (
+    "https://remoteok.com/remote-jobs",
+    "http://remoteok.com/remote-jobs",
+    "https://www.remoteok.com/remote-jobs",
+    "http://www.remoteok.com/remote-jobs",
+)
+
+BAD_SCRAPED_URL_NETLOCS = {
+    "remoteok.com",
+    "www.remoteok.com",
+}
+
+
+def has_bad_scraped_content(*values: str | None) -> bool:
+    text = "\n".join(str(value or "") for value in values)
+    text_lower = text.lower()
+    if any(marker in text for marker in BAD_SCRAPED_EXACT_MARKERS):
+        return True
+    if any(phrase in text_lower for phrase in BAD_SCRAPED_PHRASES):
+        return True
+    if re.search(r"please mention the word\b.{0,240}\btag\s+[a-z0-9+/=]{12,}", text_lower, re.I | re.S):
+        return True
+
+    for raw_value in values:
+        value = str(raw_value or "").strip()
+        if not value:
+            continue
+        lowered = value.lower()
+        if any(lowered.startswith(prefix) for prefix in BAD_SCRAPED_URL_PREFIXES):
+            return True
+        parsed = urlparse(value)
+        if parsed.netloc.lower() in BAD_SCRAPED_URL_NETLOCS and parsed.path.lower().startswith("/remote-jobs"):
+            return True
+    return False
