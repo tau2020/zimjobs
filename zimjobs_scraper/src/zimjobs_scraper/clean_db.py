@@ -4,6 +4,7 @@ import argparse
 import os
 
 from .db import SQLiteJobRepository
+from .indexnow import submit_changed_urls_to_indexnow
 from .logging_config import configure_logging
 
 
@@ -36,14 +37,20 @@ def clean_expired_jobs(db_path: str, table_name: str = "jobs", dry_run: bool = F
     repo = SQLiteJobRepository(db_path, table_name=table_name)
     try:
         deleted = repo.delete_expired_jobs(dry_run=dry_run)
+        changed_urls = list(repo.deleted_urls)
         fts_rebuilt = 0
         if deleted and not dry_run:
             fts_rebuilt = int(repo.rebuild_fts_if_present())
+        indexnow_submitted = 0
+        if changed_urls and not dry_run:
+            indexnow_submitted = int(submit_changed_urls_to_indexnow(changed_urls))
         return {
             "expired_jobs": deleted,
             "deleted": 0 if dry_run else deleted,
             "dry_run": int(dry_run),
             "fts_rebuilt": fts_rebuilt,
+            "indexnow_urls": len(set(changed_urls)) if not dry_run else 0,
+            "indexnow_submitted": indexnow_submitted,
             "total_jobs": repo.count_jobs(),
         }
     finally:
@@ -59,17 +66,23 @@ def clean_jobs(
     repo = SQLiteJobRepository(db_path, table_name=table_name)
     try:
         expired = repo.delete_expired_jobs(dry_run=dry_run)
+        changed_urls = list(repo.deleted_urls)
         bad = repo.delete_bad_description_jobs(dry_run=dry_run) if bad_descriptions else 0
         deleted = 0 if dry_run else expired + bad
         fts_rebuilt = 0
         if deleted:
             fts_rebuilt = int(repo.rebuild_fts_if_present())
+        indexnow_submitted = 0
+        if changed_urls and not dry_run:
+            indexnow_submitted = int(submit_changed_urls_to_indexnow(changed_urls))
         return {
             "expired_jobs": expired,
             "bad_description_jobs": bad,
             "deleted": deleted,
             "dry_run": int(dry_run),
             "fts_rebuilt": fts_rebuilt,
+            "indexnow_urls": len(set(changed_urls)) if not dry_run else 0,
+            "indexnow_submitted": indexnow_submitted,
             "total_jobs": repo.count_jobs(),
         }
     finally:

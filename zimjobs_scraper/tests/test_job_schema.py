@@ -241,6 +241,20 @@ def test_sitemap_robots_and_canonical_rules(tmp_path, monkeypatch):
     assert admin_response.status_code == 302
 
 
+def test_indexnow_key_file_route(tmp_path, monkeypatch):
+    monkeypatch.setenv("INDEXNOW_KEY", "indexnow-test-key-123")
+    web_app = import_web_app(tmp_path, monkeypatch)
+    client = web_app.app.test_client()
+
+    response = client.get("/indexnow-test-key-123.txt")
+    wrong_response = client.get("/wrong-key.txt")
+
+    assert response.status_code == 200
+    assert response.mimetype == "text/plain"
+    assert response.get_data(as_text=True) == "indexnow-test-key-123"
+    assert wrong_response.status_code == 404
+
+
 def test_landing_page_renders_filtered_jobs_alert_cta_and_tracking(tmp_path, monkeypatch):
     web_app = import_web_app(tmp_path, monkeypatch)
     harare_id = insert_job(

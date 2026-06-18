@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from .dedupe import canonical_url_key, identity_keys, normalized_key, similar
+from .indexnow import canonical_job_url
 from .models import JobRecord
 from .normalization import (
     BAD_SCRAPED_EXACT_MARKERS,
@@ -19,6 +20,26 @@ from .normalization import (
 log = logging.getLogger(__name__)
 
 CORE_COLUMNS = ["title", "company", "location", "category", "summary", "apply_url", "featured", "created_at"]
+MATERIAL_UPDATE_COLUMNS = [
+    "title",
+    "company",
+    "location",
+    "category",
+    "summary",
+    "apply_url",
+    "source_name",
+    "source_url",
+    "posted_at",
+    "expires_at",
+    "department",
+    "employment_type",
+    "salary_range",
+    "remote_status",
+    "job_description",
+    "requirements",
+    "external_job_id",
+    "content_hash",
+]
 OPTIONAL_COLUMNS_SQL = {
     "source_name": "TEXT",
     "source_url": "TEXT",
@@ -51,6 +72,8 @@ class SQLiteJobRepository:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(db_path)
         self.conn.row_factory = sqlite3.Row
+        self.changed_urls: list[str] = []
+        self.deleted_urls: list[str] = []
         self.ensure_schema()
 
     def close(self) -> None:
@@ -96,10 +119,19 @@ class SQLiteJobRepository:
                 "title",
                 "company",
                 "location",
+                "category",
                 "summary",
                 "apply_url",
                 "source_name",
                 "source_url",
+                "posted_at",
+                "expires_at",
+                "department",
+                "employment_type",
+                "salary_range",
+                "remote_status",
+                "job_description",
+                "requirements",
                 "external_job_id",
                 "content_hash",
             ]
@@ -108,12 +140,15 @@ class SQLiteJobRepository:
         return self.conn.execute(f"SELECT {', '.join(selected)} FROM {self.table_name}").fetchall()
 
     def exists_duplicate(self, job: JobRecord) -> bool:
+        return self.find_duplicate(job) is not None
+
+    def find_duplicate(self, job: JobRecord) -> sqlite3.Row | None:
         rows = self.existing_candidates()
         incoming_key = normalized_key(job)
         incoming_identities = set(identity_keys(job))
         for row in rows:
             if "content_hash" in row.keys() and row["content_hash"] and job.content_hash and row["content_hash"] == job.content_hash:
-                return True
+                return row
             row_key = "|".join(
                 re.sub(r"\W+", " ", str(row[col] or "").lower()).strip()
                 for col in ["title", "company", "location"]
@@ -121,13 +156,13 @@ class SQLiteJobRepository:
             row_identities = set(self._row_identity_keys(row))
             shared_identities = incoming_identities & row_identities
             if any(identity.startswith("external:") for identity in shared_identities):
-                return True
+                return row
             if shared_identities:
                 if incoming_key == row_key or similar(row["summary"] or "", job.summary) >= 0.90:
-                    return True
+                    return row
             if incoming_key == row_key and similar(row["summary"] or "", job.summary) >= 0.90:
-                return True
-        return False
+                return row
+        return None
 
     def _row_identity_keys(self, row: sqlite3.Row) -> list[str]:
         source_name = row["source_name"] if "source_name" in row.keys() else None
@@ -144,19 +179,54 @@ class SQLiteJobRepository:
             keys.append(f"apply:{apply_url}")
         return keys
 
-    def insert(self, job: JobRecord) -> bool:
+    def insert(self, job: JobRecord) -> int | None:
         if self.exists_duplicate(job):
             log.info("db_skip_duplicate", extra={"job_title": job.title, "url": job.apply_url})
-            return False
+            return None
         available = self.columns()
+        return self._insert_job(job, available)
+
+    def _insert_job(self, job: JobRecord, available: set[str]) -> int:
         data = asdict(job)
         insert_cols = [col for col in CORE_COLUMNS + list(OPTIONAL_COLUMNS_SQL.keys()) if col in available and data.get(col) is not None]
         placeholders = ", ".join([":" + col for col in insert_cols])
         sql = f"INSERT INTO {self.table_name} ({', '.join(insert_cols)}) VALUES ({placeholders})"
-        self.conn.execute(sql, {col: data[col] for col in insert_cols})
+        cur = self.conn.execute(sql, {col: data[col] for col in insert_cols})
         self.conn.commit()
         log.info("db_inserted", extra={"job_title": job.title, "url": job.apply_url})
-        return True
+        return int(cur.lastrowid)
+
+    def _material_values(self, job: JobRecord, available: set[str]) -> dict[str, object]:
+        data = asdict(job)
+        return {
+            col: data.get(col)
+            for col in MATERIAL_UPDATE_COLUMNS
+            if col in available and data.get(col) is not None
+        }
+
+    def has_material_update(self, existing: sqlite3.Row, job: JobRecord, available: set[str]) -> bool:
+        values = self._material_values(job, available)
+        for col, incoming in values.items():
+            if col not in existing.keys():
+                continue
+            current = existing[col]
+            if str(current or "").strip() != str(incoming or "").strip():
+                return True
+        return False
+
+    def update_existing(self, job_id: int, job: JobRecord, available: set[str]) -> None:
+        values = self._material_values(job, available)
+        if "scraped_at" in available and job.scraped_at:
+            values["scraped_at"] = job.scraped_at
+        if not values:
+            return
+        set_sql = ", ".join(f"{col}=:{col}" for col in values)
+        self.conn.execute(
+            f"UPDATE {self.table_name} SET {set_sql} WHERE id=:id",
+            {**values, "id": job_id},
+        )
+        self.conn.commit()
+        log.info("db_updated", extra={"job_title": job.title, "url": job.apply_url})
 
     def insert_many(
         self,
@@ -166,18 +236,34 @@ class SQLiteJobRepository:
     ) -> dict[str, int]:
         jobs = list(jobs)
         total = len(jobs)
-        stats = {"inserted": 0, "skipped": 0, "failed": 0}
+        stats = {"inserted": 0, "updated": 0, "skipped": 0, "failed": 0}
+        self.changed_urls = []
+        available = self.columns()
         for index, job in enumerate(jobs, start=1):
             try:
-                if self.exists_duplicate(job):
-                    stats["skipped"] += 1
+                existing = self.find_duplicate(job)
+                if existing:
+                    if self.has_material_update(existing, job, available):
+                        if dry_run:
+                            log.info("dry_run_update", extra={"job_title": job.title, "url": job.apply_url})
+                        else:
+                            self.update_existing(int(existing["id"]), job, available)
+                            url = canonical_job_url(existing["id"], job.title)
+                            if url:
+                                self.changed_urls.append(url)
+                        stats["updated"] += 1
+                    else:
+                        stats["skipped"] += 1
                     continue
                 if dry_run:
                     log.info("dry_run_insert", extra={"job_title": job.title, "url": job.apply_url})
                     stats["inserted"] += 1
                 else:
-                    inserted = self.insert(job)
-                    stats["inserted" if inserted else "skipped"] += 1
+                    job_id = self._insert_job(job, available)
+                    url = canonical_job_url(job_id, job.title)
+                    if url:
+                        self.changed_urls.append(url)
+                    stats["inserted"] += 1
             except Exception:
                 stats["failed"] += 1
                 log.exception("db_insert_failed", extra={"job_title": job.title, "url": job.apply_url})
@@ -191,6 +277,7 @@ class SQLiteJobRepository:
         return int(row["count"])
 
     def delete_expired_jobs(self, dry_run: bool = False) -> int:
+        self.deleted_urls = []
         available = self.columns()
         if "expires_at" not in available:
             return 0
@@ -198,10 +285,15 @@ class SQLiteJobRepository:
             "expires_at IS NOT NULL AND TRIM(expires_at) <> '' "
             "AND date(substr(expires_at, 1, 10)) < date('now')"
         )
-        row = self.conn.execute(f"SELECT COUNT(*) AS count FROM {self.table_name} WHERE {where}").fetchone()
-        count = int(row["count"])
+        rows = self.conn.execute(f"SELECT id, title FROM {self.table_name} WHERE {where}").fetchall()
+        count = len(rows)
         if dry_run or count == 0:
             return count
+        self.deleted_urls = [
+            url
+            for url in (canonical_job_url(row["id"], row["title"]) for row in rows)
+            if url
+        ]
 
         self.rebuild_fts_if_present()
 

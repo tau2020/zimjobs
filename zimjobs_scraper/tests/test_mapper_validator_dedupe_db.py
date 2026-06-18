@@ -134,6 +134,68 @@ def test_sqlite_auto_adds_enriched_optional_columns(tmp_path: Path):
     assert row[2] == "A/GEN/13/21"
 
 
+def test_sqlite_insert_many_tracks_changed_urls_and_material_updates(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("BASE_URL", "https://zimjobs.example")
+    db_path = tmp_path / "jobs.db"
+    repo = SQLiteJobRepository(str(db_path), auto_add_optional_columns=True)
+    cfg = SourceConfig(name="x", type="generic", start_urls=[])
+    first = map_raw_job(
+        RawJob(
+            source_name="x",
+            source_url="https://example.com/jobs/changed",
+            title="Operations Coordinator",
+            company="Org",
+            location="Harare",
+            summary="Coordinate field operations, logistics, documentation, stakeholder updates, and team reporting across Zimbabwe.",
+            apply_url="https://example.com/jobs/changed",
+        ),
+        cfg,
+    )
+    unchanged = map_raw_job(
+        RawJob(
+            source_name="x",
+            source_url="https://example.com/jobs/changed",
+            title="Operations Coordinator",
+            company="Org",
+            location="Harare",
+            summary="Coordinate field operations, logistics, documentation, stakeholder updates, and team reporting across Zimbabwe.",
+            apply_url="https://example.com/jobs/changed",
+        ),
+        cfg,
+    )
+    changed = map_raw_job(
+        RawJob(
+            source_name="x",
+            source_url="https://example.com/jobs/changed",
+            title="Operations Coordinator",
+            company="Org",
+            location="Harare",
+            summary="Coordinate field operations, logistics, compliance files, fleet scheduling, stakeholder updates, and weekly team reporting across Zimbabwe.",
+            apply_url="https://example.com/jobs/changed",
+        ),
+        cfg,
+    )
+
+    inserted = repo.insert_many([first])
+    inserted_urls = list(repo.changed_urls)
+    skipped = repo.insert_many([unchanged])
+    skipped_urls = list(repo.changed_urls)
+    updated = repo.insert_many([changed])
+    updated_urls = list(repo.changed_urls)
+    row = repo.conn.execute("SELECT summary FROM jobs WHERE id=1").fetchone()
+    repo.close()
+
+    assert inserted["inserted"] == 1
+    assert inserted["updated"] == 0
+    assert inserted_urls == ["https://zimjobs.example/job/1/operations-coordinator"]
+    assert skipped["skipped"] == 1
+    assert skipped["updated"] == 0
+    assert skipped_urls == []
+    assert updated["updated"] == 1
+    assert updated_urls == ["https://zimjobs.example/job/1/operations-coordinator"]
+    assert "fleet scheduling" in row["summary"]
+
+
 def test_sqlite_delete_expired_jobs_removes_saved_refs(tmp_path: Path):
     db_path = tmp_path / "jobs.db"
     repo = SQLiteJobRepository(str(db_path), auto_add_optional_columns=True)

@@ -9,6 +9,7 @@ from typing import Iterable
 from .db import SQLiteJobRepository
 from .dedupe import dedupe_in_memory
 from .http_client import HttpClient
+from .indexnow import submit_changed_urls_to_indexnow
 from .mapper import map_raw_job
 from .models import JobRecord, RawJob
 from .parsers import SourceConfig, make_parser
@@ -161,6 +162,15 @@ def run(
         )
         if not dry_run:
             stats["fts_rebuilt"] = int(repo.rebuild_fts_if_present())
+            changed_urls = list(repo.changed_urls)
+            stats["indexnow_urls"] = len(set(changed_urls))
+            if changed_urls:
+                stats["indexnow_submitted"] = int(submit_changed_urls_to_indexnow(changed_urls))
+            else:
+                stats["indexnow_submitted"] = 0
+        else:
+            stats["indexnow_urls"] = 0
+            stats["indexnow_submitted"] = 0
         stats["total_jobs"] = repo.count_jobs()
     finally:
         repo.close()

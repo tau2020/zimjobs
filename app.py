@@ -44,6 +44,20 @@ except ImportError:  # pragma: no cover - fallback for unusual deployments.
     def _is_probable_merged_job_text(_title, _text):
         return False
 
+try:
+    from zimjobs_scraper.indexnow import (
+        canonical_job_path as indexnow_job_path,
+        submit_url_to_indexnow,
+    )
+except ImportError:  # pragma: no cover - fallback for unusual deployments.
+
+    def indexnow_job_path(job_id, title):
+        safe_title = re.sub(r"[^a-z0-9]+", "-", str(title or "").lower()).strip("-")
+        return f"/job/{job_id}/{safe_title}"
+
+    def submit_url_to_indexnow(_url_or_path):
+        return False
+
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -54,7 +68,11 @@ log = logging.getLogger("zimjobs.web")
 
 DB_PATH     = os.environ.get("DB_PATH", "/data/jobs.db")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "change-me")
-SITE_URL    = os.environ.get("SITE_URL", "http://localhost:8000").rstrip("/")
+BASE_URL    = os.environ.get("BASE_URL", "https://zimjobs.online").rstrip("/")
+SITE_URL    = os.environ.get(
+    "SITE_URL",
+    BASE_URL if os.environ.get("BASE_URL") else "http://localhost:8000",
+).rstrip("/")
 PER_PAGE    = 20
 IS_PRODUCTION = (
     os.environ.get("FLASK_ENV") == "production"
@@ -350,7 +368,9 @@ def request_context_snapshot():
 def runtime_config_snapshot():
     return {
         "db_path": DB_PATH,
+        "base_url": BASE_URL,
         "site_url": SITE_URL,
+        "indexnow_key_set": bool(os.environ.get("INDEXNOW_KEY", "").strip()),
         "port": os.environ.get("PORT"),
         "log_level": LOG_LEVEL,
         "secret_key_set": bool(os.environ.get("SECRET_KEY")),
@@ -1629,6 +1649,44 @@ def row_value(row, key, default=""):
     return row[key] if key in row.keys() and row[key] is not None else default
 
 
+INDEXNOW_JOB_MATERIAL_COLUMNS = (
+    "title",
+    "company",
+    "location",
+    "category",
+    "summary",
+    "apply_url",
+    "employment_type",
+    "salary_range",
+    "remote_status",
+    "experience_level",
+    "expires_at",
+    "posted_at",
+    "department",
+    "job_description",
+    "requirements",
+    "tags",
+)
+
+
+def configured_indexnow_key():
+    return os.environ.get("INDEXNOW_KEY", "").strip()
+
+
+def job_material_snapshot(row):
+    if not row:
+        return {}
+    return {
+        col: str(row_value(row, col)).strip()
+        for col in INDEXNOW_JOB_MATERIAL_COLUMNS
+        if col in row.keys()
+    }
+
+
+def job_material_changed(before, after):
+    return job_material_snapshot(before) != job_material_snapshot(after)
+
+
 def row_looks_low_value_job(row):
     title = clean_inline_job_text(row_value(row, "title")).lower()
     if not title or title in LOW_VALUE_JOB_TITLES:
@@ -1660,6 +1718,26 @@ def row_is_public_job(row):
         and not row_looks_low_value_job(row)
         and not row_has_bad_scraped_content(row)
     )
+
+
+def notify_indexnow_job_change(job_id, title, submission_reason="job_changed"):
+    path = indexnow_job_path(job_id, title)
+    try:
+        return submit_url_to_indexnow(path)
+    except Exception as exc:  # pragma: no cover - defensive isolation.
+        log_event(
+            logging.WARNING,
+            "indexnow_notify_failed",
+            reason=submission_reason,
+            error=error_snapshot(exc),
+        )
+        return False
+
+
+def notify_indexnow_for_public_job(row, submission_reason="job_changed"):
+    if row and row_is_public_job(row):
+        return notify_indexnow_job_change(row["id"], row["title"], submission_reason)
+    return False
 
 
 def absolute_url(path=""):
@@ -2291,6 +2369,8 @@ def post():
                 f"INSERT INTO jobs({','.join(cols)}) "
                 f"VALUES({','.join('?' * len(cols))})", vals)
             db.commit()
+            row = db.execute("SELECT * FROM jobs WHERE id=?", (cur.lastrowid,)).fetchone()
+            notify_indexnow_for_public_job(row, "manual_post_insert")
             if not api_token_valid:
                 send_job_published_email(cur.lastrowid, cleaned_values)
             return redirect(url_for("index"))
@@ -2307,6 +2387,16 @@ def post():
 
 
 # ------------------------------- SEO --------------------------------
+@app.route("/<indexnow_key>.txt")
+def indexnow_key_file(indexnow_key):
+    key = configured_indexnow_key()
+    if not key or not hmac.compare_digest(indexnow_key, key):
+        abort(404)
+    response = Response(key, mimetype="text/plain; charset=utf-8")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.route("/sitemap.xml")
 def sitemap():
     db = get_db()

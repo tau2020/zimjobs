@@ -8,7 +8,9 @@ from app import (get_db, CATEGORIES, PER_PAGE, EMPLOYMENT_TYPES,
                  clean_core_job_values, limited_arg, page_arg,
                  validate_job_values, safe_redirect_target,
                  request_context_snapshot, log_event, clean_inline_job_text,
-                 is_safe_public_url, AFFILIATE_DISCLOSURE)
+                 is_safe_public_url, AFFILIATE_DISCLOSURE,
+                 job_material_changed, notify_indexnow_for_public_job,
+                 notify_indexnow_job_change, row_is_public_job)
 import logging
 from auth import admin_required, check_csrf
 
@@ -245,6 +247,7 @@ def job_form(job_id=None):
             job = dict(f)
         else:
             if job_id:
+                before = job
                 set_cols = list(fields) + ["featured"] + list(opt.keys())
                 vals = [cleaned_core[k] for k in fields] + \
                        [1 if f.get("featured") else 0] + list(opt.values())
@@ -252,14 +255,22 @@ def job_form(job_id=None):
                     "UPDATE jobs SET " +
                     ",".join(f"{c}=?" for c in set_cols) +
                     " WHERE id=?", vals + [job_id])
+                changed_job_id = job_id
             else:
                 cols = list(fields) + ["featured"] + list(opt.keys())
                 vals = [cleaned_core[k] for k in fields] + \
                        [1 if f.get("featured") else 0] + list(opt.values())
-                db.execute(
+                cur = db.execute(
                     f"INSERT INTO jobs({','.join(cols)}) "
                     f"VALUES({','.join('?' * len(cols))})", vals)
+                before = None
+                changed_job_id = cur.lastrowid
             db.commit()
+            after = db.execute("SELECT * FROM jobs WHERE id=?", (changed_job_id,)).fetchone()
+            if before is not None and row_is_public_job(before) and not row_is_public_job(after):
+                notify_indexnow_job_change(before["id"], before["title"], "admin_job_unpublish")
+            elif before is None or job_material_changed(before, after):
+                notify_indexnow_for_public_job(after, "admin_job_save")
             flash("Job saved.")
             return redirect(url_for("admin.jobs"))
     return render_template("admin/job_form.html", job=job, job_id=job_id,
@@ -290,9 +301,14 @@ def job_feature(job_id):
 def job_delete(job_id):
     check_csrf()
     db = get_db()
+    row = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    should_notify = bool(row and row_is_public_job(row))
+    title = row["title"] if row else ""
     db.execute("DELETE FROM saved_jobs WHERE job_id=?", (job_id,))
     db.execute("DELETE FROM jobs WHERE id=?", (job_id,))
     db.commit()
+    if should_notify:
+        notify_indexnow_job_change(job_id, title, "admin_job_delete")
     flash("Job deleted.")
     return redirect(url_for("admin.jobs"))
 

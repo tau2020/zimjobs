@@ -22,6 +22,7 @@ class JsonFormatter(logging.Formatter):
             "url",
             "status",
             "inserted",
+            "updated",
             "skipped",
             "failed",
             "count",
@@ -35,6 +36,8 @@ class JsonFormatter(logging.Formatter):
             "table",
             "total_jobs",
             "fts_rebuilt",
+            "indexnow_urls",
+            "indexnow_submitted",
         }
         for key, value in record.__dict__.items():
             if key.startswith("job_") or key in extra_keys:

@@ -39,6 +39,59 @@ To ensure the SQLite database is kept persistent and updated daily, configure yo
    * To disable only the bad-description cleanup without disabling the scraper, set `ENABLE_BAD_DESCRIPTION_CLEANUP=0`.
    * Cron output is appended to `/data/scraper.log`.
 
+## IndexNow Setup
+
+IndexNow notifies supported search engines when public job detail URLs are
+created, materially updated, expired, deleted, or unpublished.
+
+Railway environment variables:
+
+```bash
+BASE_URL=https://zimjobs.online
+INDEXNOW_KEY=<your-indexnow-key>
+```
+
+`BASE_URL` defaults to `https://zimjobs.online` for IndexNow submissions. Keep
+`SITE_URL=https://zimjobs.online` set too if you want sitemap and canonical URLs
+to use the production domain explicitly.
+
+Generate a key locally:
+
+```bash
+openssl rand -hex 32
+```
+
+Deploy with `INDEXNOW_KEY` set, then verify the required key file:
+
+```bash
+curl -i "https://zimjobs.online/${INDEXNOW_KEY}.txt"
+```
+
+The response must be `200`, `Content-Type: text/plain`, and the body must be
+only the key. Wrong or missing keys return `404`.
+
+Manual live verification:
+
+```bash
+BASE_URL=https://zimjobs.online INDEXNOW_KEY="$INDEXNOW_KEY" \
+python scripts/verify_indexnow.py
+```
+
+The script checks configuration, verifies the live key file, finds one public
+`/job/` URL from `sitemap.xml`, submits it once, submits it through the bulk
+endpoint, and confirms missing-key submission skips safely.
+
+IndexNow response codes:
+
+```text
+200 OK                  URL or URL set received successfully
+202 Accepted            URL received; key validation is pending
+400 Bad Request         Invalid request format
+403 Forbidden           Key is invalid or key file cannot be verified
+422 Unprocessable Entity URL host/key does not match protocol requirements
+429 Too Many Requests   Submission rate looks excessive
+```
+
 ## Transactional Email With Resend
 
 The web app can send transactional email through Resend for account welcomes,
